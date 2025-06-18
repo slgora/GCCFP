@@ -1,36 +1,31 @@
 ### Project: Agrobiodiversity ###
 ### Data exploration
-### Agrobiodiversity_dataexploration.R
+### Agrobiodiversity_dataexploration_wrangling.R
 ### by Sarah Gora
 ### Date created: 2025_03_26
+### Updated: 2025_06_18
 
 library(readr)
 library(readxl)
 library(dplyr)
 library(purrr)
-
 library(tidyr)
 library(httr)
 library(jsonlite)
+library(stringr)
 
 
 ################# Genesys Data Read In #########################################
 # read in Genesys data export (4.8 million accessions, all of genesys accessions)
-WCFP_Genesys_data_all <- read.csv("C:/Users/sarah/Desktop/Agrobiodiversity/GCCFP/Comparative_data/Genesys/colin_dataset_from_Christelle_2025-03-25.csv", sep = ";")
-# combine GENUS and SPECIES column into a new column "taxa"
-WCFP_Genesys_data_all <- WCFP_Genesys_data_all %>%
-  mutate(taxa = paste(GENUS, SPECIES, sep = " "))
-# annotate data source as genebanks
-WCFP_Genesys_data_all <- cbind(WCFP_Genesys_data_all, data_source = "Genebank") # Add field: data_source
+WCFP_Genesys_data_all <- read.csv("Data/colin_dataset_from_Christelle_2025-03-25.csv", sep = ";")
+WCFP_Genesys_data_all <- cbind(WCFP_Genesys_data_all, data_source = "Genesys") # Add field: data_source
 
 
 ################## BGCI Plant Search Data Read In #############################
 # read in BGCI Plant Search export data and combine into one file
-file_paths <- list.files("C:/Users/sarah/Desktop/Agrobiodiversity/GCCFP/Comparative_data/BGCI_PlantSearch/WCFP/exports from PS", full.names = TRUE, pattern = "\\.csv$")
-WCFP_BGCIPlantSearch_data <- file_paths %>%
-  map_df(read.csv)
-#annotate data source as Botanic gardens
-WCFP_BGCIPlantSearch_data <- cbind(WCFP_BGCIPlantSearch_data, data_source = "Botanic garden") # Add field: data_source
+file_paths <- list.files("Data/exports from PS", full.names = TRUE, pattern = "\\.csv$")
+WCFP_BGCI_data <- file_paths %>% map_df(read.csv)
+WCFP_BGCI_data <- cbind(WCFP_BGCI_data, data_source = "BGCI") # Add field: data_source
 
 
 
@@ -40,21 +35,27 @@ WCFP_BGCIPlantSearch_data <- cbind(WCFP_BGCIPlantSearch_data, data_source = "Bot
 
 ############## Align Genesys and BGCI PS taxon to WFO ###########################
 
-# Load Data & Functions
+
+# For Genesys, use intraspecific data in SUBTAXA field to standardize taxa
+# make a new column called "taxa" by combining GENUS, SPECIES, and SUBTAXA (but still keeps original columns)
+WCFP_Genesys_data_all <- WCFP_Genesys_data_all %>%
+  mutate(taxa = paste(GENUS, SPECIES, SUBTAXA, sep = " "))
+
+# load Genesys Data and Functions
 df <- WCFP_Genesys_data_all
 
 # import function query_taxa_resolver
 # function to query API of https://verifier.globalnames.org
 query_taxa_resolver <- function(taxa, sources = c('196')) {
   if (!is.character(taxa)) return("Invalid input")
-  
+
   taxa_format <- gsub(" ", "+", taxa)
   URL <- paste0('https://verifier.globalnames.org/api/v1/verifications/', taxa_format,
                 '?data_sources=', paste(sources, collapse = "|"),
                 '&all_matches=false&capitalize=true&species_group=false&fuzzy_uninomial=false&stats=false&main_taxon_threshold=0.8')
-  
+
   print(URL)  # Debugging step - make sure it's inside the function!
-  
+
   tryCatch({
     r <- GET(URL)
     if (r$status_code != 200) {
@@ -67,9 +68,9 @@ query_taxa_resolver <- function(taxa, sources = c('196')) {
     return(list(error="API request failed"))
   })
 }
-       
+
 # import function extract_best_result
-       # function to extract the best results from the query search 
+       # function to extract the best results from the query search
        extract_best_result <- function(list_res){
          final <- list()
          for (i in list_res){
@@ -92,7 +93,7 @@ query_taxa_resolver <- function(taxa, sources = c('196')) {
            }}
          return(final)
        }
-       
+
 
 # Prepare Taxa List
 taxa_list <- unique(trimws(na.omit(df$taxa)))
@@ -115,35 +116,57 @@ res_WFO <- extract_best_result(result_queries_WFO)
 taxa_standardized_df_WFO <- as.data.frame(do.call(rbind, res_WFO))
 colnames(taxa_standardized_df_WFO) <- c('input_name', 'matched_name_WFO', 'match_type_WFO', 'status_WFO', 'output_name_WFO')
 
-# Add Data Source Column
-taxa_standardized_df_WFO <- cbind(taxa_standardized_df_WFO, data_source = "WFO")
-
 # Save Results
 df_save_results <- apply(taxa_standardized_df_WFO, 2, as.character)
-write.csv(df_save_results, 'WCFP_Genesys_standardized_taxa_WFO_06_03_25.csv', row.names = FALSE)
+write.csv(df_save_results, 'WCFP_Genesys_standardized_taxa_WFO_06_18_25.csv', row.names = FALSE)
 
 
 
 #### add standardized_taxa column
-# read in 
-WCFP_Genesys_standardized_taxa <- read_csv("WCFP_Genesys_standardized_taxa_WFO_06_03_25.csv")
+# read in
+WCFP_Genesys_standardized_taxa <- read_csv("Data/WCFP_Genesys_standardized_taxa_WFO_06_18_25.csv")
 
-# standardization table is correctly structured
+# Structure standardization table for easy look up
+WCFP_Genesys_standardized_taxa <- as.data.frame(WCFP_Genesys_standardized_taxa, stringsAsFactors = FALSE)
 standardization_table_Genesys <- setNames(WCFP_Genesys_standardized_taxa$output_name_WFO, WCFP_Genesys_standardized_taxa$input_name)
-# WCFP_Genesys_data_all has the Standardized_taxa column initialized
-WCFP_Genesys_data_all$Standardized_taxa <- NA  
-# Add standardized names from WFO to WCFP_Genesys_data_all
-WCFP_Genesys_data_all2 <- WCFP_Genesys_data_all%>%
-  mutate(Standardized_taxa = ifelse(!is.na(taxa) & taxa %in% names(standardization_table_Genesys), 
-                                    standardization_table_Genesys[taxa], 
-                                    Standardized_taxa))
+# example name look up
+standardization_table_Genesys["Avena sativa"]
+
+# Make Standardized_taxa column
+WCFP_Genesys_data_all$Standardized_taxa <- NA
+# Trim whitespace in taxa field
+WCFP_Genesys_data_all$taxa <- trimws(WCFP_Genesys_data_all$taxa)
+# Match standardized taxa WFO to Genesys dataset
+WCFP_Genesys_data_all2 <- WCFP_Genesys_data_all %>%
+  mutate(Standardized_taxa = standardization_table_Genesys[match(taxa, names(standardization_table_Genesys))])
+
+
+# check unmatched taxa
+unmatched_taxa <- setdiff(unique(WCFP_Genesys_data_all$taxa), names(standardization_table_Genesys))
+length(unmatched_taxa)  #83 taxa not standardized
+# add column if taxa was matched T/F
+WCFP_Genesys_data_all2 <- WCFP_Genesys_data_all2 %>%
+  mutate(Match_Found = taxa %in% names(standardization_table_Genesys))
+# view taxa not standardized
+Genesys_unmatched_df <- WCFP_Genesys_data_all2 %>%
+  filter(!Match_Found)
+
+
+
+
+
+
+
+
+
+
 
 # Save updated results
-write.csv(WCFP_Genesys_data_all2, 'WCFP_Genesys_standardized_taxa_WFO_df_06_06_25.csv', row.names = FALSE)
+write.csv(WCFP_Genesys_data_all2, 'WCFP_Genesys_standardized_taxa_WFO_df_06_11_25.csv', row.names = FALSE)
 
 
 # Standardize Genesys field names
-WCFP_Genesys_data_all3 <- read_csv("WCFP_Genesys_standardized_taxa_WFO_df_06_06_25.csv")
+WCFP_Genesys_data_all3 <- read_csv("WCFP_Genesys_standardized_taxa_WFO_df_06_11_25.csv")
 # Standardize Genesys column names
 WCFP_Genesys_data_all3 <- WCFP_Genesys_data_all3 %>%
         rename(
@@ -178,20 +201,20 @@ WCFP_Genesys_data_all3 <- WCFP_Genesys_data_all3 %>%
   mutate(
     # Keep the full taxon name for reference
     taxon_and_authors_standardized_WFO = taxon_name_standardized_WFO,
-    
+
     # Extract the first two words (Genus & Species)
     taxon_name_standardized_WFO = word(taxon_and_authors_standardized_WFO, 1, 2),
-    
+
     # Extract everything after the first two words as authors
     taxon_authors_standardized_WFO = str_trim(str_replace(taxon_and_authors_standardized_WFO, paste0("^", taxon_name_standardized_WFO, "\\s*"), ""))
   )
 
 
 ## Filter for our crops/list
-# read in plant list 
+# read in plant list
 WCFP_plantlist <- read_excel("C:/Users/sarah/Desktop/Agrobiodiversity/GCCFP/Plants_list/WCFP_simplified_240921.xlsx")
-# filter for WCFP crops 
-# Keep rows in WCRP_Genesys_data_all3 where the taxa name (taxon_name_accepted) 
+# filter for WCFP crops
+# Keep rows in WCRP_Genesys_data_all3 where the taxa name (taxon_name_accepted)
 # in WCFP_plantlist matches the standardized taxa names (taxon_name_standardized_WFO) in WCRP_Genesys_data_all3
 WCFP_Genesys_data_filtered <- WCFP_Genesys_data_all3 %>%
   filter(taxon_name_standardized_WFO %in% WCFP_plantlist$taxon_name_accepted)
@@ -199,7 +222,7 @@ WCFP_Genesys_data_filtered <- WCFP_Genesys_data_all3 %>%
 
 # view the dropped rows:
 # many rows part of the plant list so need to refine the taxa filtering step
-dropped_rows <- anti_join(WCFP_Genesys_data_all3, WCFP_plantlist, 
+dropped_rows <- anti_join(WCFP_Genesys_data_all3, WCFP_plantlist,
                           by = c("taxon_name_standardized_WFO" = "taxon_name_accepted"))
 
 
@@ -211,20 +234,20 @@ dropped_rows <- anti_join(WCFP_Genesys_data_all3, WCFP_plantlist,
 ############## Align BGCI Plant Search taxon to WFO ###########################
 
 # Load Data & Functions
-df <- WCFP_BGCIPlantSearch_data 
+df <- WCFP_BGCIPlantSearch_data
 
 # import function query_taxa_resolver
 # function to query API of https://verifier.globalnames.org
 query_taxa_resolver <- function(taxa, sources = c('196')) {
   if (!is.character(taxa)) return("Invalid input")
-  
+
   taxa_format <- gsub(" ", "+", taxa)
   URL <- paste0('https://verifier.globalnames.org/api/v1/verifications/', taxa_format,
                 '?data_sources=', paste(sources, collapse = "|"),
                 '&all_matches=false&capitalize=true&species_group=false&fuzzy_uninomial=false&stats=false&main_taxon_threshold=0.8')
-  
+
   print(URL)  # Debugging step - make sure it's inside the function!
-  
+
   tryCatch({
     r <- GET(URL)
     if (r$status_code != 200) {
@@ -239,7 +262,7 @@ query_taxa_resolver <- function(taxa, sources = c('196')) {
 }
 
 # import function extract_best_result
-# function to extract the best results from the query search 
+# function to extract the best results from the query search
 extract_best_result <- function(list_res){
   final <- list()
   for (i in list_res){
@@ -285,25 +308,22 @@ res_WFO <- extract_best_result(result_queries_WFO)
 taxa_standardized_df_WFO <- as.data.frame(do.call(rbind, res_WFO))
 colnames(taxa_standardized_df_WFO) <- c('input_name', 'matched_name_WFO', 'match_type_WFO', 'status_WFO', 'output_name_WFO')
 
-# Add Data Source Column
-taxa_standardized_df_WFO <- cbind(taxa_standardized_df_WFO, data_source = "WFO")
-
 # Save Results
 df_save_results <- apply(taxa_standardized_df_WFO, 2, as.character)
 write.csv(df_save_results, 'WCFP_BGCI-PlantSearch_standardized_taxa_WFO_06_03_25.csv', row.names = FALSE)
 
 
 #### add standardized_taxa column
-# read in 
-WCFP_BGCI_PlantSearch_standardized_taxa <- read_csv("WCFP_BGCI-PlantSearch_standardized_taxa_WFO_06_03_25.csv")
+# read in
+WCFP_BGCI_PlantSearch_standardized_taxa <- read_csv("WCFP_BGCI_PlantSearch_standardized_taxa_WFO_06_03_25.csv")
 # standardization table is correctly structured
 standardization_table_BGCI <- setNames(WCFP_BGCI_PlantSearch_standardized_taxa$output_name_WFO, WCFP_BGCI_PlantSearch_standardized_taxa$input_name)
 # WCFP_Genesys_data_all has the Standardized_taxa column initialized
-WCFP_BGCIPlantSearch_data$Standardized_taxa <- NA  
+WCFP_BGCIPlantSearch_data$Standardized_taxa <- NA
 # Add standardized names from WFO to WCFP_BGCIPlantSearch_data
 WCFP_BGCIPlantSearch_data2 <- WCFP_BGCIPlantSearch_data%>%
-  mutate(Standardized_taxa = ifelse(!is.na(Accepted.Name..in.PlantSearch.) & Accepted.Name..in.PlantSearch. %in% names(standardization_table_BGCI), 
-                                    standardization_table_BGCI[Accepted.Name..in.PlantSearch.], 
+  mutate(Standardized_taxa = ifelse(!is.na(Accepted.Name..in.PlantSearch.) & Accepted.Name..in.PlantSearch. %in% names(standardization_table_BGCI),
+                                    standardization_table_BGCI[Accepted.Name..in.PlantSearch.],
                                     Standardized_taxa))
 # save
 write.csv(WCFP_BGCIPlantSearch_data2, 'WCFP_BGCI_PlantSearch_standardized_taxa_WFO_df_06_06_25.csv', row.names = FALSE)
@@ -313,8 +333,14 @@ write.csv(WCFP_BGCIPlantSearch_data2, 'WCFP_BGCI_PlantSearch_standardized_taxa_W
 
 
 # Standardize BGCI field names
-# read in 
-WCFP_BGCI_data_all3 <- read_csv("WCFP_BGCI_PlantSearch_standardized_taxa_WFO_df_06_06_25.csv")
+# read in
+WCFP_BGCI_data_all3 <- read_csv("Data/WCFP_BGCI_PlantSearch_standardized_taxa_WFO_df_06_03_25.csv")
+
+# delete this step
+WCFP_BGCI_data_all3 <- WCFP_BGCI_data_all3 %>%
+  select(-data_source.x) %>%
+  rename(data_source = data_source.y)
+
 # Standardize BGCI column names
 WCFP_BGCI_data_all3 <- WCFP_BGCI_data_all3 %>%
   rename(
@@ -354,12 +380,12 @@ WCFP_BGCI_data_all3 <- WCFP_BGCI_data_all3 %>%
 
 
 ## Filter for our crops/list
-# read in plant list 
+# read in plant list
 WCFP_plantlist <- read_excel("C:/Users/sarah/Desktop/Agrobiodiversity/GCCFP/Plants_list/WCFP_simplified_240921.xlsx")
-# filter for WCFP crops 
-# (1) Keep rows in WCRP_BGCI_data_all3 where the taxa name (taxon_name_accepted) 
+# filter for WCFP crops
+# (1) Keep rows in WCRP_BGCI_data_all3 where the taxa name (taxon_name_accepted)
 # in WCFP_plantlist matches the standardized taxa names (taxon_name_standardized_WFO) in WCRP_BGCI_data_all3
-# (2) if there is an NA in the taxon_name_standardized_WFO then keep rows if taxa name (taxon_name_accepted) 
+# (2) if there is an NA in the taxon_name_standardized_WFO then keep rows if taxa name (taxon_name_accepted)
 # in WCFP_plantlist matches the taxon name submitted (taxon_name_standardized_WFO) in WCRP_BGCI_data_all3
 # (3) or if NA in standardized name then if WCFP_plantlist matches the taxon synonym (taxon_synonymous_name_PlantSearch) in WCRP_BGCI_data_all3
 # (4) or keep rows directly where taxon_name_submitted matches taxon_name_accepted, even if taxon_name_standardized_WFO is not NA.
@@ -373,7 +399,7 @@ WCFP_BGCI_data_filtered <- WCFP_BGCI_data_all3 %>%
   )
 
 # View the dropped rows:
-# View the filtered-out rows, 72 taxa 
+# View the filtered-out rows, 72 taxa
 # Still need to hand check these
 filtered_out_rows <- anti_join(WCFP_BGCI_data_all3, WCFP_BGCI_data_filtered, by = colnames(WCFP_BGCI_data_all3))
 View(filtered_out_rows)
@@ -394,26 +420,26 @@ View(filtered_out_rows)
 ## this is a lot of data to merge efficiently, so filter by our plant names first on the ind datasets
 
 
-# remove duplicates 
+# remove duplicates
 
 
-              
-              
-              
-              
-              
-              
-              
+
+
+
+
+
+
+
 
 ### to do: Annotate the Plant List
-# read in plant list 
+# read in plant list
 WCFP_plantlist <- read_excel("C:/Users/sarah/Desktop/Agrobiodiversity/GCCFP/Plants_list/WCFP_simplified_240921.xlsx")
 
 
 ##### 1. major crops vs minor crops
 ## anything NOT on ptftw list as minor crop
 ##### 2. Cultivated vs wild? - how to easily do?
-##### 3. Food group (cereal, pulse, vegetable, etc.)? 
-  
+##### 3. Food group (cereal, pulse, vegetable, etc.)?
+
 
 
