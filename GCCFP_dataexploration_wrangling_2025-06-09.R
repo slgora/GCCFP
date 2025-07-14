@@ -3,7 +3,7 @@
 ### Agrobiodiversity_dataexploration_wrangling.R
 ### by Sarah Gora
 ### Date created: 2025_03_26
-### Updated: 2025_06_24
+### Updated: 2025_07_14
 
 library(readr)
 library(readxl)
@@ -99,23 +99,23 @@ clean_taxonomic_string <- function(taxon_string) {
 
 library(stringr)
 
-# 🎯 Target columns
+# Target columns
 target_cols <- c("SPECIES", "SPAUTHOR", "SUBTAXA")
 
-# 📦 Chunk configuration
+# Chunk configuration
 chunk_size <- 500000
 total_rows <- nrow(WCFP_Genesys_data_all)
 num_chunks <- ceiling(total_rows / chunk_size)
 
 # Chunked processing loop
 for (col_name in target_cols) {
-  message("🚀 Starting cleaning for column: ", col_name)
+  message(" Starting cleaning for column: ", col_name)
 
   for (i in seq_len(num_chunks)) {
     start_row <- (i - 1) * chunk_size + 1
     end_row <- min(i * chunk_size, total_rows)
 
-    message("⏳ Processing rows ", start_row, " to ", end_row, " of ", total_rows)
+    message("Processing rows ", start_row, " to ", end_row, " of ", total_rows)
 
     # Time the chunk
     chunk_time <- system.time({
@@ -126,40 +126,19 @@ for (col_name in target_cols) {
       )
     })
 
-    message("✅ Finished chunk ", i, "/", num_chunks, " in ",
+    message("Finished chunk ", i, "/", num_chunks, " in ",
             round(chunk_time[3], 2), " seconds")
 
     # Optional: Save interim results
     # saveRDS(WCFP_Genesys_data_all, paste0("cleaned_", col_name, "_chunk_", i, ".rds"))
   }
 
-  message("🎉 All chunks done for column: ", col_name)
+  message("All chunks done for column: ", col_name)
 }
 
+# end test
 
 
-
-
-
-
-# Fix some taxa names mispelled in Genesys
-delete "[" and "]"
-delete "ERSP+FERR+MILT+LUT"
-delete "'paul no?l'"
-replace "dardarii" with "dardari"
-replace "?" with " "
-replace "var. nutans+defic" with "var. nutans"
-replace "convar. dentiformis+mays" with "convar. dentiformis"
-replace "convar. semident (dentiformis+mays)" with "convar. semindent"
-replace "var.roshanum (uzunsov)+ rufulinflatum" with "var. roshanum Uzunsov"
-replace "var.roshanum (uzunsov)+ rufulinflatum" with "var. wernerianum; var. karsiense"
-replace "var.echinoides+ag dənli" with "var. echinoides"
-replace "sp. Paluma Range (G. Sankowsky+ 450)" with "sp."
-replace "sp. Mt Isa (R.L. Specht + 49)" with "sp."
-replace "nut+pall" with "subsp. nutans and subsp. pallidum"
-replace "r/lutescens+lutences" with "var. lutescens"
-replace "var. erythrospermum+ferr" with "var. erythrospermum"
-replace "montana+brunnea/a.vaviloviana/" with "(montana, brunnea); vaviloviana"
 
 
 
@@ -210,7 +189,7 @@ WCFP_Genesys_data_all <- WCFP_Genesys_data_all %>%
 
 
 
-############## what to do about taxa that were not standardized, send to CK #########
+############## what to do about taxa that were not standardized, fix via function above #########
 # check unmatched taxa, 83
 unmatched_taxa <- setdiff(unique(WCFP_Genesys_data_all$taxa), names(standardization_table_Genesys))
 
@@ -415,7 +394,6 @@ WCFP_BGCI_dropped_rows <- WCFP_BGCI_data3_cleaned %>%  # 101,650 rows, the clean
   filter(!Match_Found)
 
 
-# write down Qs about what to do about matches filtering out stage
 
 
 
@@ -515,6 +493,7 @@ WCFP_plantlist <- read_excel("C:/Users/sarah/Desktop/Agrobiodiversity/GCCFP/Plan
 
 
 # View and explore data, counts 06_25_2025
+# Reminder, this is not count of accessions, of species ***
 
 # view the accepted taxa names in BGCI
 unique_taxa_df <- data.frame(taxon_name_accepted_PlantSearch = unique(WCFP_BGCI_data_filtered$taxon_name_accepted_PlantSearch))
@@ -539,7 +518,7 @@ unique_taxa_count <- length(unique(WCFP_Genesys_data_filtered$taxon_name_standar
 
 
 
-# count of the number of accessions in institutions
+# count of the number of species in institutions
 # not a metric, just to view the top instituions holding germplasm
 
 # add institution names to genesys for easier review
