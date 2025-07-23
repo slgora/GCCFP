@@ -50,11 +50,98 @@ WCFP_BGCI_data <- list.files("Data/exports from PS", full.names = TRUE, pattern 
   mutate(data_source = "BGCI")
 
 #----------------------#
-#--- Taxa Standardization -#
+#--- WCFP Plant List Taxa Standardization -#
 #----------------------#
-
 source("Functions/query_taxa_resolver.R")
 source("Functions/extract_best_result.R")
+
+# WCFP Plant List: Taxa Standardization
+
+# combine accepted authors with taxon in a new field called taxa to standardize
+WCFP_plantlist <- WCFP_plantlist %>%
+  mutate(taxa = paste(taxon_name_accepted, taxon_authors_accepted, sep = " "))
+WCFP_plantlist <- WCFP_plantlist %>%
+  mutate(
+    taxa = taxa %>%
+      str_replace_all("\t", " ") %>%     # Replace tabs with spaces
+      str_remove_all("\\+") %>%          # Remove plus signs
+      str_squish()                       # Trim extra whitespace )
+
+plantlist_taxa_list <- unique(trimws(na.omit(WCFP_plantlist$taxa)))
+
+result_queries_WFO <- map(plantlist_taxa_list, ~ query_taxa_resolver(.x, c('196')))
+res_WFO <- extract_best_result(result_queries_WFO)
+taxa_standardized_df_WFO <- as.data.frame(do.call(rbind, res_WFO))
+colnames(taxa_standardized_df_WFO) <- c('input_name', 'matched_name_WFO', 'match_type_WFO', 'status_WFO', 'output_name_WFO')
+write.csv(taxa_standardized_df_WFO, 'Outputs/WCFP_plantlist_standardized_taxaWFO_2025-07-23.csv', row.names = FALSE)
+
+
+standardization_table_PlantList <- setNames(taxa_standardized_df_WFO$output_name_WFO, taxa_standardized_df_WFO$input_name)
+WCFP_plantlist <- standardize_taxa(WCFP_plantlist, "taxa", standardization_table_PlantList)
+WCFP_plantlist <- WCFP_plantlist %>%
+  mutate(
+    Standardized_taxa = ifelse(  # only keep taxa standardized to a differing name
+      word(taxa, 1, 2) == word(Standardized_taxa, 1, 2),
+      "",
+      Standardized_taxa
+    )
+  )
+# reject taxonomic standardization of taxa to just the Genus
+names_reject <- c(
+  "Aerva Forssk.",
+  "Arthroceras Piirainen & G.Kadereit",
+  "Dysphania R.Br.",
+  "Oxybasis Kar. & Kir.",
+  "Dioscorea Plum. ex L.",
+  "Dovyalis E.Mey. ex Arn.",
+  "Chenopodium L.",
+  "Rumex L.",
+  "Harpephyllum Bernh. ex Krauss",
+  "Mimusops L.",
+  "Koenigia L.",
+  "Quercus subg. Quercus",
+  "Talinum Adans.",
+  "Grewia L.",
+  "Jubaeopsis Becc.",
+  "Rauvolfia L.",
+  "Encephalartos Lehm.",
+  "Cordia L.",
+  "Monanthotaxis Baill.",
+  "Uvaria L.",
+  "Pimpinella L.",
+  "Senegalia Raf.",
+  "Ipomoea L.",
+  "Bulbine Wolf",
+  "Sideritis L.",
+  "Erythrina L.",
+  "Buchanania Spreng.",
+  "Taxus L.",
+  "Amomum L.",
+  "Inga Mill.",
+  "Holmbergia Hicken",
+  "Aralia L.",
+  "Asparagus L.",
+  "Thottea Rottb.",
+  "Ulva Haller",
+  "Callicarpa L.",
+  "Jatropha L.",
+  "Bryopsis Reiche",
+  "Phenax Wedd.",
+  "Moraea Mill.",
+  "Saurauia Willd.",
+  "Euphorbia L.",
+  "Taraxacum F.H.Wigg.",
+  "Ximenia Plum. ex L.")
+WCFP_plantlist <- WCFP_plantlist %>%
+  mutate(
+    Standardized_taxa = ifelse(Standardized_taxa %in% names_reject, "", Standardized_taxa))
+write.csv(WCFP_plantlist, 'Outputs/WCFP_plantlist_standardized_2025-07-23.csv', row.names = FALSE)
+
+
+
+#----------------------#
+#--- Genesys Taxa Standardization -#
+#----------------------#
 
 # Genesys: Create taxa field
 WCFP_Genesys_data_all <- WCFP_Genesys_data_all %>%
