@@ -1,0 +1,117 @@
+# Load necessary libraries
+install.packages(c("dplyr", "readr", "readxl", "tidyr", "httr", "jsonlite"))
+library(dplyr)
+library(readr)
+library(readxl)
+library(tidyr)
+library(httr)
+library(jsonlite)
+
+# Create output directory if it doesn't exist
+if(!dir.exists("GnVerifier")) dir.create("GnVerifier")
+
+# Load required functions
+source('Functions/query_taxa_resolver.R')
+source('Functions/extract_best_result.R')
+
+# Define a function to process a single dataset
+standardize_taxa <- function(df, taxon_col, output_prefix) {
+  # Prepare taxa list
+  taxa_list <- unique(trimws(na.omit(df[[taxon_col]])))
+  result_queries_WFO <- list()
+  result_queries_GRIN <- list()
+  counter <- 0
+  total <- length(taxa_list)
+
+  for (i in taxa_list) {
+    print(paste0(round(counter / total * 100, 2), "% - ", i))
+    best_result_WFO <- tryCatch(query_taxa_resolver(i, c('196')), error = function(e) NA)
+    best_result_GRIN <- tryCatch(query_taxa_resolver(i, c('6')), error = function(e) NA)
+    result_queries_WFO <- append(result_queries_WFO, list(best_result_WFO))
+    result_queries_GRIN <- append(result_queries_GRIN, list(best_result_GRIN))
+    counter <- counter + 1
+  }
+
+  # Extract best results
+  res_WFO <- extract_best_result(result_queries_WFO)
+  res_GRIN <- extract_best_result(result_queries_GRIN)
+  taxa_standardized_df_WFO <- as.data.frame(do.call(rbind, res_WFO), stringsAsFactors = FALSE)
+  taxa_standardized_df_GRIN <- as.data.frame(do.call(rbind, res_GRIN), stringsAsFactors = FALSE)
+
+  colnames(taxa_standardized_df_WFO) <- c('input_name', 'matched_name_WFO', 'match_type_WFO', 'status_WFO', 'output_name_WFO')
+  colnames(taxa_standardized_df_GRIN) <- c('input_name', 'matched_name_GRIN', 'match_type_GRIN', 'status_GRIN', 'output_name_GRIN')
+
+  # Join results from GRIN and WFO
+  taxa_standardized_df <- full_join(taxa_standardized_df_GRIN, taxa_standardized_df_WFO, by = "input_name") %>%
+    rename(Taxon = input_name)
+
+  # Ensure columns are character before comparison and output
+  taxa_standardized_df[] <- lapply(taxa_standardized_df, as.character)
+  taxa_standardized_df <- taxa_standardized_df %>%
+    mutate(WFO_GRIN_match = case_when(
+      is.na(matched_name_WFO) | is.na(matched_name_GRIN) ~ "differ",
+      matched_name_WFO == matched_name_GRIN ~ "match",
+      TRUE ~ "differ"
+    ))
+
+  # Save taxa table with match field
+  write.csv(taxa_standardized_df, paste0("GnVerifier/", output_prefix, "_taxa_table.csv"), row.names = FALSE)
+
+  # Prepare for joining: include WFO_GRIN_match
+  matched_names <- taxa_standardized_df %>%
+    select(Taxon, matched_name_GRIN, matched_name_WFO, WFO_GRIN_match) %>%
+    mutate(Taxon = as.character(Taxon))
+
+  # Merge with original data, bring in match field
+  df_joined <- df %>%
+    left_join(matched_names, by = setNames("Taxon", taxon_col)) %>%
+    rename(
+      taxon_standardized_GRIN = matched_name_GRIN,
+      taxon_standardized_WFO = matched_name_WFO
+    )
+
+  # Ensure no list columns in final output
+  df_joined[] <- lapply(df_joined, as.character)
+
+  # Save final standardized file (includes WFO_GRIN_match)
+  write.csv(df_joined, paste0("GnVerifier/", output_prefix, ".csv"), row.names = FALSE)
+}
+
+# ---- RUN 1 ----
+cwr_veg_list <- read_csv("C:/Users/sarah/Downloads/CWR genepools for veg list 07 July 2025_SG.csv")
+standardize_taxa(
+  cwr_veg_list,
+  taxon_col = "Taxon",
+  output_prefix = "CWR_genepools_for_veg_list_standardized_2025_09_11"
+)
+
+# ---- RUN 2 ----
+veg_list_2 <- read_excel("C:/Users/sarah/Desktop/Vegetable species list_1450_2.xlsx", sheet = 2) %>%
+  rename(Taxon = `Species name`)
+standardize_taxa(
+  veg_list_2,
+  taxon_col = "Taxon",
+  output_prefix = "Vegetable_species_list_1450_2_standardized_2025_09_11"
+)
+
+# ---- RUN 3 ----
+ptftw_veg_list_3 <- read_excel("Vegetable_list_plants_that_feed_the_world.xlsx") %>%
+  unite(full_taxa, Genus, `Species epithet`, Authority, sep = " ", na.rm = TRUE, remove = FALSE) %>%
+  rename(Taxon = full_taxa)
+standardize_taxa(
+  ptftw_veg_list_3,
+  taxon_col = "Taxon",
+  output_prefix = "Vegetable_list_plants_that_feed_the_world_standardized_2025_09_11"
+)
+
+# ---- RUN 4 ----
+redlist_download <- read_csv("Agrobio_veg_list/RedList_results_download/assessments_with_html.csv") %>%
+  rename(Taxon = scientificName)
+standardize_taxa(
+  redlist_download,
+  taxon_col = "Taxon",
+  output_prefix = "RedList_assessments_with_html_standardized_2025_09_23"
+)
+
+
+
