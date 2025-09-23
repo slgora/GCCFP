@@ -1,0 +1,941 @@
+#----------------------#
+#--- Metrics Calculation  -#
+#----------------------#
+library(stringr)
+library(openxlsx)
+library(dplyr)
+library(tidyr)
+library(dplyr)
+library(stringr)
+library(purrr)
+library(readr)
+library(readxl)
+
+library(readr)
+library(dplyr)
+library(stringr)
+library(readxl)
+
+# 1. Read in data
+genebank_accessionlevel_dataset <- read_csv("G:/.shortcut-targets-by-id/1kQBvFIumhKQHnxSXNhr7w70dvuHgheEO/GCCFP/Data and analyses/Complementarity analysis/Data_processed/Datasets_processed/WCFP_genebank_accessionlevel_dataset_2025-08-26.csv")
+botanicgarden_accessionlevel_dataset <- read_csv("G:/.shortcut-targets-by-id/1kQBvFIumhKQHnxSXNhr7w70dvuHgheEO/GCCFP/Data and analyses/Complementarity analysis/Data_processed/Datasets_processed/WCFP_botanicgarden_accessionlevel_dataset_2025-08-27.csv")
+botanicgarden_accessionlevel_dataset <- botanicgarden_accessionlevel_dataset %>%
+  mutate(inst_status = ifelse(is.na(inst_status) | inst_status == "", "National", inst_status))
+botanicgarden_specieslevel_dataset <- read_csv("G:/.shortcut-targets-by-id/1kQBvFIumhKQHnxSXNhr7w70dvuHgheEO/GCCFP/Data and analyses/Complementarity analysis/Data_processed/Datasets_processed/WCFP_botanicgarden_specieslevel_dataset_2025-08-26.csv")
+botanicgarden_specieslevel_dataset <- botanicgarden_specieslevel_dataset %>%
+  mutate(inst_status = "National")
+
+WCFP_plantlist_processed <- read_excel("G:/.shortcut-targets-by-id/1kQBvFIumhKQHnxSXNhr7w70dvuHgheEO/GCCFP/Data and analyses/Complementarity analysis/Data_processed/WCFP_plantlist_processed_2025-08-07.xlsx")
+
+WIEWS_instIDs <- read_excel("C:/Users/sarah/Desktop/GCCS-Metrics/Data/FAOWIEWS_data/WIEWS_instIDs.xlsx")
+
+
+# 2. Prepare reference tables
+ref_gs <- WCFP_plantlist_processed %>%
+  mutate(genus_species = str_trim(str_to_lower(genus_species))) %>%
+  select(genus_species, taxon_name_accepted) %>%
+  filter(!is.na(genus_species) & genus_species != "") %>%
+  distinct(genus_species, .keep_all = TRUE)
+
+ref_wfo <- WCFP_plantlist_processed %>%
+  mutate(genus_species_WFO = str_trim(str_to_lower(genus_species_WFO))) %>%
+  select(genus_species_WFO, taxon_name_accepted) %>%
+  filter(!is.na(genus_species_WFO) & genus_species_WFO != "") %>%
+  distinct(genus_species_WFO, .keep_all = TRUE)
+
+# 3. Annotate function
+add_plant_list_origin <- function(df) {
+  df <- df %>%
+    mutate(genus_species = str_trim(str_to_lower(genus_species)))
+  # 3a. Primary match on genus_species
+  df1 <- df %>%
+    left_join(ref_gs, by = "genus_species")
+  # 3b. For NA matches, try genus_species_WFO
+  idx_na <- which(is.na(df1$taxon_name_accepted) & !is.na(df1$genus_species) & df1$genus_species != "")
+  if(length(idx_na) > 0) {
+    df2 <- df1[idx_na, ] %>%
+      select(-taxon_name_accepted) %>%
+      left_join(ref_wfo, by = c("genus_species" = "genus_species_WFO"))
+    df1$plant_list_origin <- df1$taxon_name_accepted
+    df1$plant_list_origin[idx_na] <- df2$taxon_name_accepted
+  } else {
+    df1$plant_list_origin <- df1$taxon_name_accepted
+  }
+  df1 <- df1 %>% select(-taxon_name_accepted)
+  return(df1)
+}
+
+# 4. Apply to each dataset
+genebank_accessionlevel_dataset <- add_plant_list_origin(genebank_accessionlevel_dataset)
+botanicgarden_accessionlevel_dataset <- add_plant_list_origin(botanicgarden_accessionlevel_dataset)
+botanicgarden_specieslevel_dataset <- add_plant_list_origin(botanicgarden_specieslevel_dataset)
+
+
+
+# --------------------------------------------------------------------------
+
+
+## read in processed data:
+# Read Genebank accession-level dataset
+genebank_accessionlevel_dataset <- read_csv("G:/.shortcut-targets-by-id/1kQBvFIumhKQHnxSXNhr7w70dvuHgheEO/GCCFP/Data and analyses/Complementarity analysis/Data_processed/Datasets_processed/WCFP_genebank_accessionlevel_dataset_2025-09-16.csv")
+
+# Read Botanic Garden accession-level dataset
+botanicgarden_accessionlevel_dataset <- read_csv("G:/.shortcut-targets-by-id/1kQBvFIumhKQHnxSXNhr7w70dvuHgheEO/GCCFP/Data and analyses/Complementarity analysis/Data_processed/Datasets_processed/WCFP_botanicgarden_accessionlevel_dataset_2025-09-16.csv")
+
+# Read Botanic Garden species-level dataset
+botanicgarden_specieslevel_dataset <- read_csv("G:/.shortcut-targets-by-id/1kQBvFIumhKQHnxSXNhr7w70dvuHgheEO/GCCFP/Data and analyses/Complementarity analysis/Data_processed/Datasets_processed/WCFP_botanicgarden_specieslevel_dataset_2025-09-16.csv")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##### 1. Taxa extraction and summary
+library(dplyr)
+library(stringr)
+library(openxlsx)
+
+# Genebank: extract unique taxa and count accessions
+genebank_taxa <- genebank_accessionlevel_dataset %>%
+  filter(!is.na(plant_list_origin)) %>%
+  mutate(plant_list_origin = str_replace(plant_list_origin, "^(\\w+)", ~str_to_title(.x))) %>%
+  count(plant_list_origin, name = "accession_count") %>%
+  mutate(dataset_source = "Genebank (accession-level)") %>%
+  select(plant_list_origin, accession_count, dataset_source) %>%
+  arrange(desc(accession_count))
+
+# Botanic garden (accession-level): extract unique taxa and count accessions
+bg_accession_taxa <- botanicgarden_accessionlevel_dataset %>%
+  filter(!is.na(plant_list_origin)) %>%
+  mutate(plant_list_origin = str_replace(plant_list_origin, "^(\\w+)", ~str_to_title(.x))) %>%
+  count(plant_list_origin, name = "accession_count") %>%
+  mutate(dataset_source = "Botanic garden (accession-level)") %>%
+  select(plant_list_origin, accession_count, dataset_source) %>%
+  arrange(desc(accession_count))
+
+# Botanic garden (species-level): extract unique taxa
+bg_species_taxa <- botanicgarden_specieslevel_dataset %>%
+  filter(!is.na(plant_list_origin)) %>%
+  distinct(plant_list_origin) %>%
+  mutate(dataset_source = "Botanic garden (species-level)") %>%
+  arrange(plant_list_origin)
+
+# Save to Excel
+wb_taxa <- createWorkbook()
+addWorksheet(wb_taxa, "Genebank")
+writeData(wb_taxa, "Genebank", genebank_taxa)
+
+addWorksheet(wb_taxa, "BG_Accession")
+writeData(wb_taxa, "BG_Accession", bg_accession_taxa)
+
+addWorksheet(wb_taxa, "BG_Species")
+writeData(wb_taxa, "BG_Species", bg_species_taxa)
+
+saveWorkbook(wb_taxa, file = "G:/.shortcut-targets-by-id/1kQBvFIumhKQHnxSXNhr7w70dvuHgheEO/GCCFP/Data and analyses/Complementarity analysis/Metrics/by_dataset/WCFP_distinct_taxa_summary_2025-09-17.xlsx", overwrite = TRUE)
+
+
+
+
+####### 2. summary Metrics
+
+# Count distinct species
+distinct_species_genebank <- genebank_accessionlevel_dataset %>%
+  filter(!is.na(plant_list_origin)) %>%
+  distinct(plant_list_origin) %>%
+  nrow()
+
+distinct_species_bg_accession <- botanicgarden_accessionlevel_dataset %>%
+  filter(!is.na(plant_list_origin)) %>%
+  distinct(plant_list_origin) %>%
+  nrow()
+
+distinct_species_bg_species <- botanicgarden_specieslevel_dataset %>%
+  filter(!is.na(plant_list_origin)) %>%
+  distinct(plant_list_origin) %>%
+  nrow()
+
+# Percent of species in plant list
+percent_species_genebank <- round(distinct_species_genebank / nrow(WCFP_plantlist_processed) * 100, 2)
+percent_species_bg_accession <- round(distinct_species_bg_accession / nrow(WCFP_plantlist_processed) * 100, 2)
+percent_species_bg_species <- round(distinct_species_bg_species / nrow(WCFP_plantlist_processed) * 100, 2)
+
+# Total accessions
+total_accessions_genebank <- nrow(genebank_accessionlevel_dataset)
+total_accessions_bg_accession <- nrow(botanicgarden_accessionlevel_dataset)
+
+# Institution counts
+institution_count_genebank <- genebank_accessionlevel_dataset %>%
+  filter(!is.na(inst_code)) %>%
+  distinct(inst_code) %>%
+  nrow()
+
+institution_count_bg_accession <- botanicgarden_accessionlevel_dataset %>%
+  filter(!is.na(inst_code)) %>%
+  distinct(inst_code) %>%
+  nrow()
+
+institution_count_bg_species <- botanicgarden_specieslevel_dataset %>%
+  filter(!is.na(ex_situ_site_name)) %>%
+  distinct(ex_situ_site_name) %>%
+  nrow()
+
+# Genebank metrics
+genebank_count <- institution_count_genebank
+accessions_in_genebanks_genebank <- total_accessions_genebank
+# unique_species_in_genebanks_genebank <- genebank_accessionlevel_dataset %>%
+#  filter(inst_type == "Genebank", !is.na(plant_list_origin)) %>%
+#  distinct(plant_list_origin) %>%
+#  nrow()
+
+# Count of species found only in Genebanks (not in either BG dataset)
+unique_species_in_genebanks_genebank_count <- genebank_accessionlevel_dataset %>%
+  filter(!is.na(plant_list_origin)) %>%
+  distinct(plant_list_origin) %>%
+  anti_join(
+    bind_rows(
+      botanicgarden_accessionlevel_dataset %>% filter(!is.na(plant_list_origin)) %>% distinct(plant_list_origin),
+      botanicgarden_specieslevel_dataset %>% filter(!is.na(plant_list_origin)) %>% distinct(plant_list_origin)
+    ),
+    by = "plant_list_origin"
+  ) %>%
+  nrow()
+
+
+
+# Botanic garden metrics
+botanic_garden_count_genebank <- genebank_accessionlevel_dataset %>%
+  filter(inst_type == "Botanic garden") %>%
+  distinct(inst_code) %>%
+  nrow()
+
+botanic_garden_count_bg_accession <- botanicgarden_accessionlevel_dataset %>%
+  filter(inst_type == "Botanic garden") %>%
+  distinct(inst_code) %>%
+  nrow()
+
+botanic_garden_count_bg_species <- botanicgarden_specieslevel_dataset %>%
+  filter(inst_type == "Botanic garden") %>%
+  distinct(ex_situ_site_name) %>%
+  nrow()
+
+accessions_in_botanic_gardens_genebank <- genebank_accessionlevel_dataset %>%
+  filter(inst_type == "Botanic garden") %>%
+  nrow()
+
+accessions_in_botanic_gardens_bg_accession <- botanicgarden_accessionlevel_dataset %>%
+  filter(inst_type == "Botanic garden") %>%
+  nrow()
+
+# need to run by botanic garden ONLY
+# unique_species_in_botanic_gardens_genebank <- genebank_accessionlevel_dataset %>%
+#  filter(inst_type == "Botanic garden", !is.na(plant_list_origin)) %>%
+#  distinct(plant_list_origin) %>%
+#  nrow()
+
+# unique_species_in_botanic_gardens_bg_accession <- botanicgarden_accessionlevel_dataset %>%
+#  filter(inst_type == "Botanic garden", !is.na(plant_list_origin)) %>%
+#  distinct(plant_list_origin) %>%
+#  nrow()
+
+#unique_species_in_botanic_gardens_bg_species <- botanicgarden_specieslevel_dataset %>%
+#  filter(inst_type == "Botanic garden", !is.na(plant_list_origin)) %>%
+#  distinct(plant_list_origin) %>%
+#  nrow()
+
+
+
+# Species only in botanic gardens (combined), not in Genebanks
+unique_species_in_botanic_gardens_genebank <- bind_rows(
+  botanicgarden_accessionlevel_dataset %>% filter(!is.na(plant_list_origin)) %>% distinct(plant_list_origin),
+  botanicgarden_specieslevel_dataset %>% filter(!is.na(plant_list_origin)) %>% distinct(plant_list_origin)
+) %>%
+  anti_join(
+    genebank_accessionlevel_dataset %>% filter(!is.na(plant_list_origin)) %>% distinct(plant_list_origin),
+    by = "plant_list_origin"
+  )
+unique_species_in_botanic_gardens_genebank_count <- nrow(unique_species_in_botanic_gardens_genebank)
+
+
+# Species only in botanic garden accession-level dataset, not in Genebanks
+unique_species_in_botanic_gardens_bg_accession <- botanicgarden_accessionlevel_dataset %>%
+  filter(!is.na(plant_list_origin)) %>%
+  distinct(plant_list_origin) %>%
+  anti_join(
+    genebank_accessionlevel_dataset %>% filter(!is.na(plant_list_origin)) %>% distinct(plant_list_origin),
+    by = "plant_list_origin"
+  )
+unique_species_in_botanic_gardens_bg_accession_count <- nrow(unique_species_in_botanic_gardens_bg_accession)
+
+
+# Species only in botanic garden species-level dataset, not in Genebanks
+unique_species_in_botanic_gardens_bg_species <- botanicgarden_specieslevel_dataset %>%
+  filter(!is.na(plant_list_origin)) %>%
+  distinct(plant_list_origin) %>%
+  anti_join(
+    genebank_accessionlevel_dataset %>% filter(!is.na(plant_list_origin)) %>% distinct(plant_list_origin),
+    by = "plant_list_origin"
+  )
+unique_species_in_botanic_gardens_bg_species_count <- nrow(unique_species_in_botanic_gardens_bg_species)
+
+
+
+
+
+# National institutions
+national_accessions_genebank <- genebank_accessionlevel_dataset %>%
+  filter(inst_status == "National") %>%
+  nrow()
+
+national_accessions_bg_accession <- botanicgarden_accessionlevel_dataset %>%
+  filter(inst_status == "National") %>%
+  nrow()
+
+national_species_genebank <- genebank_accessionlevel_dataset %>%
+  filter(inst_status == "National", !is.na(plant_list_origin)) %>%
+  distinct(plant_list_origin) %>%
+  nrow()
+
+national_species_bg_accession <- botanicgarden_accessionlevel_dataset %>%
+  filter(inst_status == "National", !is.na(plant_list_origin)) %>%
+  distinct(plant_list_origin) %>%
+  nrow()
+
+national_institutions_genebank <- genebank_accessionlevel_dataset %>%
+  filter(inst_status == "National", !is.na(inst_name)) %>%
+  distinct(inst_name) %>%
+  nrow()
+
+national_institutions_bg_accession <- botanicgarden_accessionlevel_dataset %>%
+  filter(inst_status == "National", !is.na(inst_name)) %>%
+  distinct(inst_name) %>%
+  nrow()
+
+# International institutions
+international_accessions_genebank <- genebank_accessionlevel_dataset %>%
+  filter(inst_status == "International") %>%
+  nrow()
+
+international_accessions_bg_accession <- botanicgarden_accessionlevel_dataset %>%
+  filter(inst_status == "International") %>%
+  nrow()
+
+international_species_genebank <- genebank_accessionlevel_dataset %>%
+  filter(inst_status == "International", !is.na(plant_list_origin)) %>%
+  distinct(plant_list_origin) %>%
+  nrow()
+
+international_species_bg_accession <- botanicgarden_accessionlevel_dataset %>%
+  filter(inst_status == "International", !is.na(plant_list_origin)) %>%
+  distinct(plant_list_origin) %>%
+  nrow()
+
+international_institutions_genebank <- genebank_accessionlevel_dataset %>%
+  filter(inst_status == "International", !is.na(inst_name)) %>%
+  distinct(inst_name) %>%
+  nrow()
+
+international_institutions_bg_accession <- botanicgarden_accessionlevel_dataset %>%
+  filter(inst_status == "International", !is.na(inst_name)) %>%
+  distinct(inst_name) %>%
+  nrow()
+
+# storage accession counts:
+# seed accession count
+# field accession count
+# cryo accession count
+# invitro accession count
+# dna accession count
+# other accession count
+
+# Genebank
+accessions_seed_count_genebank <- genebank_accessionlevel_dataset %>% filter(str_detect(tolower(storage_type), "seed")) %>% nrow()
+accessions_field_count_genebank <- genebank_accessionlevel_dataset %>% filter(str_detect(tolower(storage_type), "field")) %>% nrow()
+accessions_cryo_count_genebank <- genebank_accessionlevel_dataset %>% filter(str_detect(tolower(storage_type), "cryo")) %>% nrow()
+accessions_invitro_count_genebank <- genebank_accessionlevel_dataset %>% filter(str_detect(tolower(storage_type), "invitro|in vitro")) %>% nrow()
+accessions_dna_count_genebank <- genebank_accessionlevel_dataset %>% filter(str_detect(tolower(storage_type), "dna")) %>% nrow()
+accessions_other_count_genebank <- genebank_accessionlevel_dataset %>% filter(str_detect(tolower(storage_type), "other")) %>% nrow()
+
+# Botanic garden (accession-level)
+accessions_seed_count_bg_accession <- botanicgarden_accessionlevel_dataset %>% filter(str_detect(tolower(storage_type), "seed")) %>% nrow()
+accessions_field_count_bg_accession <- botanicgarden_accessionlevel_dataset %>% filter(str_detect(tolower(storage_type), "field")) %>% nrow()
+accessions_cryo_count_bg_accession <- botanicgarden_accessionlevel_dataset %>% filter(str_detect(tolower(storage_type), "cryo")) %>% nrow()
+accessions_invitro_count_bg_accession <- botanicgarden_accessionlevel_dataset %>% filter(str_detect(tolower(storage_type), "invitro|in vitro")) %>% nrow()
+accessions_dna_count_bg_accession <- botanicgarden_accessionlevel_dataset %>% filter(str_detect(tolower(storage_type), "dna")) %>% nrow()
+accessions_other_count_bg_accession <- botanicgarden_accessionlevel_dataset %>% filter(str_detect(tolower(storage_type), "other")) %>% nrow()
+
+# Species-level dataset doesn't have accession-level storage info
+accessions_seed_count_bg_species <- NA
+accessions_field_count_bg_species <- NA
+accessions_cryo_count_bg_species <- NA
+accessions_invitro_count_bg_species <- NA
+accessions_dna_count_bg_species <- NA
+accessions_other_count_bg_species <- NA
+
+# storage species counts
+# seed distinct species count
+# plant distinct species count
+# explant distinct species count
+# pollen distinct species count
+
+
+# Helper function
+count_species_by_storage <- function(df, keyword) {
+  df %>%
+    filter(!is.na(plant_list_origin), str_detect(tolower(storage_type), keyword)) %>%
+    distinct(plant_list_origin) %>%
+    nrow()
+}
+
+# Genebank
+seed_species_genebank <- count_species_by_storage(genebank_accessionlevel_dataset, "seed")
+plant_species_genebank <- count_species_by_storage(genebank_accessionlevel_dataset, "plant")
+explant_species_genebank <- count_species_by_storage(genebank_accessionlevel_dataset, "explant")
+pollen_species_genebank <- count_species_by_storage(genebank_accessionlevel_dataset, "pollen")
+
+# Botanic garden (accession-level)
+seed_species_bg_accession <- count_species_by_storage(botanicgarden_accessionlevel_dataset, "seed")
+plant_species_bg_accession <- count_species_by_storage(botanicgarden_accessionlevel_dataset, "plant")
+explant_species_bg_accession <- count_species_by_storage(botanicgarden_accessionlevel_dataset, "explant")
+pollen_species_bg_accession <- count_species_by_storage(botanicgarden_accessionlevel_dataset, "pollen")
+
+# Botanic garden (species-level)
+seed_species_bg_species <- count_species_by_storage(botanicgarden_specieslevel_dataset, "seed")
+plant_species_bg_species <- count_species_by_storage(botanicgarden_specieslevel_dataset, "plant")
+explant_species_bg_species <- count_species_by_storage(botanicgarden_specieslevel_dataset, "explant")
+pollen_species_bg_species <- count_species_by_storage(botanicgarden_specieslevel_dataset, "pollen")
+
+
+# Create summary table
+taxa_count_summary <- tibble(
+  data_source = c("Genebank", "Botanic garden (accession-level)", "Botanic garden (species-level)"),
+  distinct_species_count = c(distinct_species_genebank, distinct_species_bg_accession, distinct_species_bg_species),
+  total_accessions_count = c(total_accessions_genebank, total_accessions_bg_accession, NA),
+  percent_species_of_plantlist = c(percent_species_genebank, percent_species_bg_accession, percent_species_bg_species),
+  distinct_institution_count = c(institution_count_genebank, institution_count_bg_accession, institution_count_bg_species),
+  genebank_count = c(genebank_count, NA, NA),
+  accessions_in_genebanks_count = c(accessions_in_genebanks_genebank, NA, NA),
+  unique_species_in_genebanks_count = c(unique_species_in_genebanks_genebank_count, NA, NA),
+  botanic_garden_count = c(botanic_garden_count_genebank, botanic_garden_count_bg_accession, botanic_garden_count_bg_species),
+  accessions_in_botanic_gardens_count = c(accessions_in_botanic_gardens_genebank, accessions_in_botanic_gardens_bg_accession, NA),
+  unique_species_in_botanic_gardens_count = c(unique_species_in_botanic_gardens_genebank, unique_species_in_botanic_gardens_bg_accession, unique_species_in_botanic_gardens_bg_species),
+  accessions_in_national_institutions = c(national_accessions_genebank, national_accessions_bg_accession, NA),
+  unique_species_in_national_institutions = c(national_species_genebank, national_species_bg_accession, NA),
+  institutions_national_count = c(national_institutions_genebank, national_institutions_bg_accession, NA),
+  accessions_in_international_institutions = c(international_accessions_genebank, international_accessions_bg_accession, NA),
+  unique_species_in_international_institutions = c(international_species_genebank, international_species_bg_accession, NA),
+  institutions_international_count = c(international_institutions_genebank, international_institutions_bg_accession, NA)
+)
+
+# add storage accession counts
+taxa_count_summary <- taxa_count_summary %>%
+  mutate(
+    accessions_seed_count = c(accessions_seed_count_genebank, accessions_seed_count_bg_accession, accessions_seed_count_bg_species),
+    accessions_field_count = c(accessions_field_count_genebank, accessions_field_count_bg_accession, accessions_field_count_bg_species),
+    accessions_cryo_count = c(accessions_cryo_count_genebank, accessions_cryo_count_bg_accession, accessions_cryo_count_bg_species),
+    accessions_invitro_count = c(accessions_invitro_count_genebank, accessions_invitro_count_bg_accession, accessions_invitro_count_bg_species),
+    accessions_dna_count = c(accessions_dna_count_genebank, accessions_dna_count_bg_accession, accessions_dna_count_bg_species),
+    accessions_other_count = c(accessions_other_count_genebank, accessions_other_count_bg_accession, accessions_other_count_bg_species)
+  )
+
+# add storage species counts
+taxa_count_summary <- taxa_count_summary %>%
+  mutate(
+    seed_distinct_species_count = c(seed_species_genebank, seed_species_bg_accession, seed_species_bg_species),
+    plant_distinct_species_count = c(plant_species_genebank, plant_species_bg_accession, plant_species_bg_species),
+    explant_distinct_species_count = c(explant_species_genebank, explant_species_bg_accession, explant_species_bg_species),
+    pollen_distinct_species_count = c(pollen_species_genebank, pollen_species_bg_accession, pollen_species_bg_species)
+  )
+
+# Transpose summary
+taxa_count_summary_transposed <- taxa_count_summary %>%
+  pivot_longer(cols = -data_source, names_to = "metric", values_to = "value") %>%
+  pivot_wider(names_from = data_source, values_from = value)
+
+# Save to Excel
+wb <- createWorkbook()
+addWorksheet(wb, "Count_summary")
+writeData(wb, "Count_summary", taxa_count_summary)
+
+addWorksheet(wb, "metric_summary_transposed")
+writeData(wb, "metric_summary_transposed", taxa_count_summary_transposed)
+
+#save
+saveWorkbook(wb, file = "G:/.shortcut-targets-by-id/1kQBvFIumhKQHnxSXNhr7w70dvuHgheEO/GCCFP/Data and analyses/Complementarity analysis/Metrics/by_dataset/WCFP_metrics_summary_2025-09-16.xlsx", overwrite = TRUE)
+
+
+
+### Other MEtrics related to the metric summary table:
+
+
+
+#### Total number of distinct food plant species found in both Genebanks and Botanic Gardens (any dataset)
+
+# Step 1: Get distinct species from Genebanks
+genebank_species <- genebank_accessionlevel_dataset %>%
+  filter(!is.na(plant_list_origin)) %>%
+  distinct(plant_list_origin)
+
+# Step 2: Get distinct species from each Botanic Garden dataset
+bg_accession_species <- botanicgarden_accessionlevel_dataset %>%
+  filter(!is.na(plant_list_origin)) %>%
+  distinct(plant_list_origin)
+
+bg_specieslevel_species <- botanicgarden_specieslevel_dataset %>%
+  filter(!is.na(plant_list_origin)) %>%
+  distinct(plant_list_origin)
+
+# Step 3: Combine and deduplicate Botanic Garden species
+botanicgarden_species <- bind_rows(
+  bg_accession_species,
+  bg_specieslevel_species
+) %>%
+  distinct(plant_list_origin)
+
+# Optional QA: Check for duplicates between BG datasets
+bg_species_duplicates <- inner_join(
+  bg_accession_species,
+  bg_specieslevel_species,
+  by = "plant_list_origin"
+)
+# View count of overlapping species
+nrow(bg_species_duplicates)
+
+# Step 4: Identify shared species between Genebanks and Botanic Gardens
+shared_species_in_genebanks_and_botanicgardens <- inner_join(
+  genebank_species,
+  botanicgarden_species,
+  by = "plant_list_origin"
+)
+
+# Step 5: Count distinct shared species
+shared_species_in_genebanks_and_botanicgardens_count <- nrow(shared_species_in_genebanks_and_botanicgardens)
+
+
+
+
+
+
+
+
+
+# distinct_species_bg_combined_count:
+# Total number of unique plant_list_origin entries found across both botanic garden datasets—
+# accession-level and species-level. This metric captures the full species diversity represented
+# in botanic garden holdings, accounting for overlap and complementarity between data sources.
+distinct_species_bg_combined <- bind_rows(
+  botanicgarden_accessionlevel_dataset %>% filter(!is.na(plant_list_origin)) %>% distinct(plant_list_origin),
+  botanicgarden_specieslevel_dataset %>% filter(!is.na(plant_list_origin)) %>% distinct(plant_list_origin)
+) %>% distinct(plant_list_origin)
+
+distinct_species_bg_combined_count <- nrow(distinct_species_bg_combined)
+
+# distinct_species_all_sources_count:
+# Total number of unique plant_list_origin entries aggregated across all datasets—
+# Genebank, Botanic Garden (accession-level), and Botanic Garden (species-level).
+# This metric reflects the overall species coverage in the integrated conservation dataset.
+distinct_species_all_sources <- bind_rows(
+  genebank_accessionlevel_dataset %>% filter(!is.na(plant_list_origin)) %>% distinct(plant_list_origin),
+  botanicgarden_accessionlevel_dataset %>% filter(!is.na(plant_list_origin)) %>% distinct(plant_list_origin),
+  botanicgarden_specieslevel_dataset %>% filter(!is.na(plant_list_origin)) %>% distinct(plant_list_origin)
+) %>% distinct(plant_list_origin)
+
+distinct_species_all_sources_count <- nrow(distinct_species_all_sources)
+
+
+
+
+
+# distinct_institution_bg_combined_count:
+# Total number of unique institutions represented across both botanic garden datasets.
+# Uses inst_code from the accession-level dataset and ex_situ_site_name from the species-level dataset.
+# This metric reflects the breadth of institutional participation in botanic garden conservation holdings,
+# accounting for both coded and named site identifiers.
+
+distinct_institutions_bg_combined <- bind_rows(
+  botanicgarden_accessionlevel_dataset %>%
+    filter(!is.na(inst_code)) %>%
+    distinct(inst_code) %>%
+    rename(institution_id = inst_code),
+
+  botanicgarden_specieslevel_dataset %>%
+    filter(!is.na(ex_situ_site_name)) %>%
+    distinct(ex_situ_site_name) %>%
+    rename(institution_id = ex_situ_site_name)
+) %>% distinct(institution_id)
+
+distinct_institution_bg_combined_count <- nrow(distinct_institutions_bg_combined)
+
+
+# distinct_institution_all_sources_count:
+# Total number of unique institutions aggregated across Genebank and Botanic Garden datasets.
+# Uses inst_code for Genebank and accession-level, and ex_situ_site_name for species-level.
+# Captures the full institutional landscape contributing to ex situ conservation efforts,
+# harmonizing identifiers across heterogeneous data sources.
+
+distinct_institutions_all_sources <- bind_rows(
+  genebank_accessionlevel_dataset %>%
+    filter(!is.na(inst_code)) %>%
+    distinct(inst_code) %>%
+    rename(institution_id = inst_code),
+
+  botanicgarden_accessionlevel_dataset %>%
+    filter(!is.na(inst_code)) %>%
+    distinct(inst_code) %>%
+    rename(institution_id = inst_code),
+
+  botanicgarden_specieslevel_dataset %>%
+    filter(!is.na(ex_situ_site_name)) %>%
+    distinct(ex_situ_site_name) %>%
+    rename(institution_id = ex_situ_site_name)
+) %>% distinct(institution_id)
+
+distinct_institution_all_sources_count <- nrow(distinct_institutions_all_sources)
+
+
+
+
+
+# Extract distinct species from each BG dataset
+bg_accession_species <- botanicgarden_accessionlevel_dataset %>%
+  filter(!is.na(plant_list_origin)) %>%
+  distinct(plant_list_origin)
+
+bg_specieslevel_species <- botanicgarden_specieslevel_dataset %>%
+  filter(!is.na(plant_list_origin)) %>%
+  distinct(plant_list_origin)
+
+# Identify duplicates between the two
+bg_species_duplicates <- inner_join(
+  bg_accession_species,
+  bg_specieslevel_species,
+  by = "plant_list_origin"
+)
+
+# View or count them
+print(bg_species_duplicates)
+nrow(bg_species_duplicates)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### Total number of distinct food plant species NOT conserved in genebanks or bgs
+# Step 1: Load or define your reference list of all known food plant species
+# This should be a dataframe with a column named "plant_list_origin"
+WCFP_plantlist_processed <- read_excel("G:/.shortcut-targets-by-id/1kQBvFIumhKQHnxSXNhr7w70dvuHgheEO/GCCFP/Data and analyses/Complementarity analysis/Data_processed/WCFP_plantlist_processed_2025-08-07.xlsx")
+
+
+########################## rename taxon_name_accepted to plant_list_origin ##################################33
+WCFP_plantlist_processed <- WCFP_plantlist_processed %>%
+  rename(plant_list_origin = taxon_name_accepted)
+
+
+# Normalize plant_list_origin across all datasets
+genebank_accessionlevel_dataset <- genebank_accessionlevel_dataset %>%
+  mutate(plant_list_origin = str_trim(str_to_lower(plant_list_origin)))
+
+botanicgarden_accessionlevel_dataset <- botanicgarden_accessionlevel_dataset %>%
+  mutate(plant_list_origin = str_trim(str_to_lower(plant_list_origin)))
+
+botanicgarden_specieslevel_dataset <- botanicgarden_specieslevel_dataset %>%
+  mutate(plant_list_origin = str_trim(str_to_lower(plant_list_origin)))
+
+WCFP_plantlist_processed <- WCFP_plantlist_processed %>%
+  mutate(plant_list_origin = str_trim(str_to_lower(plant_list_origin)))
+
+
+
+
+# Reference list of all known food plant species
+food_plant_species_reference <- WCFP_plantlist_processed %>%
+  filter(!is.na(plant_list_origin)) %>%
+  distinct(plant_list_origin)
+
+# Genebank species
+genebank_species <- genebank_accessionlevel_dataset %>%
+  filter(!is.na(plant_list_origin)) %>%
+  distinct(plant_list_origin)
+
+# Botanic Garden species (combined)
+botanicgarden_species <- bind_rows(
+  botanicgarden_accessionlevel_dataset %>% filter(!is.na(plant_list_origin)) %>% distinct(plant_list_origin),
+  botanicgarden_specieslevel_dataset %>% filter(!is.na(plant_list_origin)) %>% distinct(plant_list_origin)
+)
+
+# Metric 1: Species only in Genebanks
+unique_species_in_genebanks_genebank <- genebank_species %>%
+  anti_join(botanicgarden_species, by = "plant_list_origin")
+unique_species_in_genebanks_genebank_count <- nrow(unique_species_in_genebanks_genebank)
+
+# Metric 2: Species only in Botanic Gardens (combined)
+unique_species_in_botanic_gardens_genebank <- botanicgarden_species %>%
+  anti_join(genebank_species, by = "plant_list_origin")
+unique_species_in_botanic_gardens_genebank_count <- nrow(unique_species_in_botanic_gardens_genebank)
+
+# Metric 3: Species only in BG accession-level
+unique_species_in_botanic_gardens_bg_accession <- botanicgarden_accessionlevel_dataset %>%
+  filter(!is.na(plant_list_origin)) %>%
+  distinct(plant_list_origin) %>%
+  anti_join(genebank_species, by = "plant_list_origin")
+unique_species_in_botanic_gardens_bg_accession_count <- nrow(unique_species_in_botanic_gardens_bg_accession)
+
+# Metric 4: Species only in BG species-level
+unique_species_in_botanic_gardens_bg_species <- botanicgarden_specieslevel_dataset %>%
+  filter(!is.na(plant_list_origin)) %>%
+  distinct(plant_list_origin) %>%
+  anti_join(genebank_species, by = "plant_list_origin")
+unique_species_in_botanic_gardens_bg_species_count <- nrow(unique_species_in_botanic_gardens_bg_species)
+
+# Metric 5: Species shared between Genebanks and Botanic Gardens
+shared_species_in_genebanks_and_botanicgardens <- inner_join(
+  genebank_species,
+  botanicgarden_species,
+  by = "plant_list_origin"
+)
+shared_species_in_genebanks_and_botanicgardens_count <- nrow(shared_species_in_genebanks_and_botanicgardens)
+
+# Metric 6: Species not found in Genebanks or Botanic Gardens
+conserved_species <- bind_rows(genebank_species, botanicgarden_species) %>%
+  distinct(plant_list_origin)
+
+food_plant_species_not_in_genebanks_or_botanicgardens <- food_plant_species_reference %>%
+  anti_join(conserved_species, by = "plant_list_origin")
+food_plant_species_not_in_genebanks_or_botanicgardens_count <- nrow(food_plant_species_not_in_genebanks_or_botanicgardens)
+
+
+setdiff(food_plant_species_reference$plant_list_origin, conserved_species$plant_list_origin)
+
+# save list of species not found
+write.csv(food_plant_species_not_in_genebanks_or_botanicgardens,
+          "G:/.shortcut-targets-by-id/1kQBvFIumhKQHnxSXNhr7w70dvuHgheEO/GCCFP/Data and analyses/Complementarity analysis/Metrics/species_not_in_genebanks_or_botanicgardens_updated2025-09-17.csv",
+          row.names = FALSE)
+
+
+
+
+
+
+# Combine all species from Genebank and Botanic Garden datasets
+species_exsitu <- bind_rows(
+  genebank_accessionlevel_dataset %>% filter(!is.na(plant_list_origin)) %>% distinct(plant_list_origin),
+  botanicgarden_accessionlevel_dataset %>% filter(!is.na(plant_list_origin)) %>% distinct(plant_list_origin),
+  botanicgarden_specieslevel_dataset %>% filter(!is.na(plant_list_origin)) %>% distinct(plant_list_origin)
+) %>%
+  distinct(plant_list_origin)
+
+# Count total number of distinct species in ex situ conservation
+distinct_species_exsitu_count <- nrow(species_exsitu)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#### 3. Species per institution
+# Genebank species per institution
+genebank_summary_by_inst <- genebank_accessionlevel_dataset %>%
+  filter(!is.na(plant_list_origin)) %>%
+  distinct(inst_code, plant_list_origin) %>%
+  count(inst_code, name = "unique_species_count") %>%
+  left_join(WIEWS_instIDs, by = c("inst_code" = "WIEWS_INSTCODE")) %>%
+  rename(org_name = ORGNAME_L) %>%
+  select(inst_code, org_name, unique_species_count) %>%
+  arrange(desc(unique_species_count))
+
+# Botanic garden (accession-level)
+bg_accession_summary_by_inst <- botanicgarden_accessionlevel_dataset %>%
+  filter(!is.na(plant_list_origin)) %>%
+  distinct(inst_code, plant_list_origin) %>%
+  count(inst_code, name = "unique_species_count") %>%
+  left_join(WIEWS_instIDs, by = c("inst_code" = "WIEWS_INSTCODE")) %>%
+  rename(org_name = ORGNAME_L) %>%
+  select(inst_code, org_name, unique_species_count) %>%
+  arrange(desc(unique_species_count))
+
+# Botanic garden (species-level)
+bg_species_summary_by_site <- botanicgarden_specieslevel_dataset %>%
+  filter(!is.na(plant_list_origin)) %>%
+  distinct(ex_situ_site_name, plant_list_origin) %>%
+  count(ex_situ_site_name, name = "unique_species_count") %>%
+  arrange(desc(unique_species_count))
+
+# Save to Excel
+wb_inst <- createWorkbook()
+
+addWorksheet(wb_inst, "Genebank_by_inst")
+writeData(wb_inst, "Genebank_by_inst", genebank_summary_by_inst)
+
+addWorksheet(wb_inst, "BG_Accession_by_inst")
+writeData(wb_inst, "BG_Accession_by_inst", bg_accession_summary_by_inst)
+
+addWorksheet(wb_inst, "BG_Species_by_site")
+writeData(wb_inst, "BG_Species_by_site", bg_species_summary_by_site)
+
+
+saveWorkbook(wb_inst, file = "G:/.shortcut-targets-by-id/1kQBvFIumhKQHnxSXNhr7w70dvuHgheEO/GCCFP/Data and analyses/Complementarity analysis/Metrics/WCFP_species_counts_by_institution_updated2025-09-17.xlsx", overwrite = TRUE)
+
+
+
+
+
+#### Count of accessions per institution for each dataset
+# Load required libraries
+library(dplyr)
+library(openxlsx)
+
+# Count accessions per institution for Genebank dataset
+genebank_accession_counts <- genebank_accessionlevel_dataset %>%
+  filter(!is.na(inst_code)) %>%
+  count(inst_code, name = "accession_count") %>%
+  arrange(desc(accession_count))
+
+# Count accessions per institution for Botanic Garden (accession-level) dataset
+bg_accession_counts <- botanicgarden_accessionlevel_dataset %>%
+  filter(!is.na(inst_code)) %>%
+  count(inst_code, name = "accession_count") %>%
+  arrange(desc(accession_count))
+
+# Count accessions per institution for Botanic Garden (species-level) dataset
+bg_species_counts <- botanicgarden_specieslevel_dataset %>%
+  filter(!is.na(ex_situ_site_name)) %>%
+  count(ex_situ_site_name, name = "row_count") %>%
+  arrange(desc(row_count))
+
+# Save to Excel
+wb_accession_counts <- createWorkbook()
+
+addWorksheet(wb_accession_counts, "Genebank_accession_counts")
+writeData(wb_accession_counts, "Genebank_accession_counts", genebank_accession_counts)
+
+addWorksheet(wb_accession_counts, "BG_accession_counts")
+writeData(wb_accession_counts, "BG_accession_counts", bg_accession_counts)
+
+addWorksheet(wb_accession_counts, "BG_species_counts")
+writeData(wb_accession_counts, "BG_species_counts", bg_species_counts)
+
+saveWorkbook(wb_accession_counts, file = "G:/.shortcut-targets-by-id/1kQBvFIumhKQHnxSXNhr7w70dvuHgheEO/GCCFP/Data and analyses/Complementarity analysis/Metrics/WCFP_accession_counts_by_institution2025-09-17.xlsx", overwrite = TRUE)
+
+
+
+
+
+
+
+
+
+library(dplyr)
+library(openxlsx)
+
+# Genesys
+genesys_accession_counts <- genesys_df %>%
+  filter(!is.na(inst_code)) %>%
+  count(inst_code, name = "accession_count") %>%
+  mutate(data_source = "Genesys") %>%
+  arrange(desc(accession_count))
+
+# Cano
+cano_accession_counts <- cano_df %>%
+  filter(!is.na(inst_code)) %>%
+  count(inst_code, name = "accession_count") %>%
+  mutate(data_source = "Cano") %>%
+  arrange(desc(accession_count))
+
+# BGCI
+bgci_accession_counts <- bgci_df %>%
+  filter(!is.na(ex_situ_site_name)) %>%
+  count(ex_situ_site_name, name = "row_count") %>%
+  mutate(data_source = "BGCI") %>%
+  arrange(desc(row_count))
+
+# Save to Excel
+wb_source_counts <- createWorkbook()
+
+addWorksheet(wb_source_counts, "Genesys_accession_counts")
+writeData(wb_source_counts, "Genesys_accession_counts", genesys_accession_counts)
+
+addWorksheet(wb_source_counts, "Cano_accession_counts")
+writeData(wb_source_counts, "Cano_accession_counts", cano_accession_counts)
+
+addWorksheet(wb_source_counts, "BGCI_accession_counts")
+writeData(wb_source_counts, "BGCI_accession_counts", bgci_accession_counts)
+
+
+saveWorkbook(wb_accession_counts, file = "G:/.shortcut-targets-by-id/1kQBvFIumhKQHnxSXNhr7w70dvuHgheEO/GCCFP/Data and analyses/Metrics/WCFP_accession_counts_by_data_source.xlsx", overwrite = TRUE)
+
+
+
+
+
+
+
+# 1. Species only in Botanic garden (accession-level), not in genebanks
+unique_species_in_botanic_gardens_bg_accession <- botanicgarden_accessionlevel_dataset %>%
+  filter(!is.na(plant_list_origin)) %>%
+  distinct(plant_list_origin) %>%
+  anti_join(
+    genebank_accessionlevel_dataset %>%
+      filter(!is.na(plant_list_origin)) %>%
+      distinct(plant_list_origin),
+    by = "plant_list_origin"
+  )
+unique_species_in_botanic_gardens_bg_accession_count <- nrow(unique_species_in_botanic_gardens_bg_accession)
+
+# 2. Species only in Botanic garden (species-level), not in genebanks
+unique_species_in_botanic_gardens_bg_species <- botanicgarden_specieslevel_dataset %>%
+  filter(!is.na(plant_list_origin)) %>%
+  distinct(plant_list_origin) %>%
+  anti_join(
+    genebank_accessionlevel_dataset %>%
+      filter(!is.na(plant_list_origin)) %>%
+      distinct(plant_list_origin),
+    by = "plant_list_origin"
+  )
+unique_species_in_botanic_gardens_bg_species_count <- nrow(unique_species_in_botanic_gardens_bg_species)
+
+# 3. Species only in Botanic gardens (any dataset), not in genebanks (combination)
+unique_species_in_botanic_gardens_combined <- bind_rows(
+  botanicgarden_accessionlevel_dataset %>% filter(!is.na(plant_list_origin)) %>% distinct(plant_list_origin),
+  botanicgarden_specieslevel_dataset %>% filter(!is.na(plant_list_origin)) %>% distinct(plant_list_origin)
+) %>%
+  distinct(plant_list_origin) %>%
+  anti_join(
+    genebank_accessionlevel_dataset %>% filter(!is.na(plant_list_origin)) %>% distinct(plant_list_origin),
+    by = "plant_list_origin"
+  )
+unique_species_in_botanic_gardens_combined_count <- nrow(unique_species_in_botanic_gardens_combined)
+
+
+
+
+
