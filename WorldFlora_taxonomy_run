@@ -1,0 +1,194 @@
+# ---- WorldFlora Full Updated Workflow ----
+
+library(dplyr)
+library(tidyr)
+library(WorldFlora)
+
+
+# 1. Read your downloaded CSV backbone (edit path if needed)
+wfo_csv <- read.csv("C:/Users/sarah/Documents/GCCFP/classification.csv", stringsAsFactors = FALSE)
+
+# 2. Write as tab-delimited TXT for WorldFlora
+write.table(
+  wfo_csv,
+  file = "C:/Users/sarah/Documents/GCCFP/classification.txt",
+  sep = "\t",
+  row.names = FALSE,
+  quote = FALSE
+)
+
+# 3. Restart R session (RStudio: Session > Restart R), then re-run from here:
+
+# 4. Load WorldFlora and register the backbone
+library(WorldFlora)
+WFO.remember("C:/Users/sarah/Documents/GCCFP/classification.txt", quote = "")
+
+# 5. Read your plant list from CSV, extracting the 'Taxon' column
+cwr_veg_list <- read_csv("C:/Users/sarah/Downloads/CWR genepools for veg list 07 July 2025_SG.csv")
+plant_names1 <- cwr_veg_list$Taxon
+
+# 6. Run WFO.match, ALWAYS providing WFO.file
+results1 <- WFO.match(
+  plant_names1,
+  WFO.file = "C:/Users/sarah/Documents/GCCFP/classification.txt"
+)
+
+# 7. Inspect results
+View(results1)
+
+# Save taxon table results to CSV
+write.csv(results1, "C:/Users/sarah/Documents/GCCFP/Taxon_standardization/cwr_veg_list_taxon_table2025_09_11.csv", row.names = FALSE)
+
+
+
+# 1. Save the WorldFlora results as cwr_veg_list_taxon_table
+cwr_veg_list_taxon_table <- results1
+
+# 2. For each original Taxon, find the best standardized name
+# If you want the 'Accepted' scientific name for each input:
+
+# Get best match per input, prioritizing Matched == TRUE and Accepted status
+best_matches <- cwr_veg_list_taxon_table %>%
+  filter(Matched) %>%
+  group_by(spec.name.ORIG) %>%
+  # Prefer 'Accepted' taxonomicStatus, fallback to first if not found
+  arrange(factor(taxonomicStatus, levels = c("Accepted", "Unchecked", "Synonym")), .by_group = TRUE) %>%
+  slice(1) %>%
+  ungroup() %>%
+  select(spec.name.ORIG, standardized_taxon = scientificName)
+
+# 3. Merge standardized name back to your original table
+cwr_veg_list_standardized <- cwr_veg_list %>%
+  left_join(best_matches, by = c("Taxon" = "spec.name.ORIG"))
+
+# 4. Save to CSV with today's date
+write.csv(
+  cwr_veg_list_standardized,
+  "C:/Users/sarah/Documents/GCCFP/Taxon_standardization/CWR_genepools_for_veg_list_standardized_WFO2025_09_11.csv",
+  row.names = FALSE
+)
+
+
+
+##################### plant list 2 ##########3
+
+# 5. Read your plant list from CSV, extracting the 'Taxon' column
+veg_list_2 <- read_excel("C:/Users/sarah/Desktop/Vegetable species list_1450_2.xlsx", sheet = 2)
+veg_list_2 <- veg_list_2 %>%
+  rename(Taxon = `Species name`)
+plant_names2 <- veg_list_2$Taxon
+
+# 6. Run WFO.match, ALWAYS providing WFO.file
+results2 <- WFO.match(
+  plant_names2,
+  WFO.file = "C:/Users/sarah/Documents/GCCFP/classification.txt"
+)
+
+# 7. Inspect results
+View(results2)
+
+# Save taxon table results to CSV
+write.csv(results2, "C:/Users/sarah/Documents/GCCFP/Taxon_standardization/Vegetable_species_list_1450_2_taxon_table2025_09_11.csv", row.names = FALSE)
+
+
+
+# 1. Save the WorldFlora results as taxon_table
+veg_list_2_taxon_table <- results2
+
+# 2. For each original Taxon, find the best standardized name
+# If you want the 'Accepted' scientific name for each input:
+library(dplyr)
+
+# Get best match per input, prioritizing Matched == TRUE and Accepted status
+best_matches <- veg_list_2_taxon_table %>%
+  filter(Matched) %>%
+  group_by(spec.name.ORIG) %>%
+  # Prefer 'Accepted' taxonomicStatus, fallback to first if not found
+  arrange(factor(taxonomicStatus, levels = c("Accepted", "Unchecked", "Synonym")), .by_group = TRUE) %>%
+  slice(1) %>%
+  ungroup() %>%
+  select(spec.name.ORIG, standardized_taxon = scientificName)
+
+# 3. Merge standardized name back to your original table
+veg_list_2_standardized <- veg_list_2 %>%
+  left_join(best_matches, by = c("Taxon" = "spec.name.ORIG"))
+
+# 4. Save to CSV with today's date
+write.csv(
+  veg_list_2_standardized,
+  "C:/Users/sarah/Documents/GCCFP/Taxon_standardization/Vegetable_species_list_1450_2_standardized_WFO2025_09_11.csv",
+  row.names = FALSE
+)
+
+
+
+
+
+
+
+
+
+
+
+
+##################### plant list 3 #############
+
+# 5. Read your plant list from CSV, extracting the 'Taxon' column
+ptftw_veg_list_3 <- read_excel("Vegetable_list_plants_that_feed_the_world.xlsx")
+
+# make a new field of full taxa
+ptftw_veg_list_3 <- ptftw_veg_list_3 %>%
+  unite(full_taxa, Genus, `Species epithet`, Authority, sep = " ", na.rm = TRUE, remove = FALSE)
+
+# rename to be Taxon for this World Flora run
+ptftw_veg_list_3 <- ptftw_veg_list_3 %>%
+  rename(Taxon = `full_taxa`)
+plant_names3 <- ptftw_veg_list_3$Taxon
+
+# 6. Run WFO.match, ALWAYS providing WFO.file
+results3 <- WFO.match(
+  plant_names3,
+  WFO.file = "C:/Users/sarah/Documents/GCCFP/classification.txt"
+)
+
+# 7. Inspect results
+View(results3)
+
+# Save taxon table results to CSV
+write.csv(results3, "C:/Users/sarah/Documents/GCCFP/Taxon_standardization/Vegetable_list_plants_that_feed_the_world_taxon_table2025_09_11.csv", row.names = FALSE)
+
+
+
+# 1. Save the WorldFlora results as taxon_table
+ptftw_veg_list_3_taxon_table <- results3
+
+# 2. For each original Taxon, find the best standardized name
+# If you want the 'Accepted' scientific name for each input:
+
+# Get best match per input, prioritizing Matched == TRUE and Accepted status
+best_matches <- ptftw_veg_list_3_taxon_table %>%
+  filter(Matched) %>%
+  group_by(spec.name.ORIG) %>%
+  # Prefer 'Accepted' taxonomicStatus, fallback to first if not found
+  arrange(factor(taxonomicStatus, levels = c("Accepted", "Unchecked", "Synonym")), .by_group = TRUE) %>%
+  slice(1) %>%
+  ungroup() %>%
+  select(spec.name.ORIG, standardized_taxon = scientificName)
+
+# 3. Merge standardized name back to your original table
+ptftw_veg_list_3_standardized <- ptftw_veg_list_3 %>%
+  left_join(best_matches, by = c("Taxon" = "spec.name.ORIG"))
+
+# 4. Save to CSV with today's date
+write.csv(
+  ptftw_veg_list_3_standardized,
+  "C:/Users/sarah/Documents/GCCFP/Taxon_standardization/Vegetable_list_plants_that_feed_the_world_standardized_WFO2025_09_11.csv",
+  row.names = FALSE
+)
+
+
+
+
+
+
+
