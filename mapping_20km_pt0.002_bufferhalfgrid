@@ -1,0 +1,519 @@
+
+########################## Global Food Plant Occurrence Complementarity Maps ##########################
+# Author: Sarah Gora
+# Date: 2025_09_09
+# Description:
+#   - Generates overlays for 20km grid: occurrence and species richness heatmaps
+#   - Overlays: Botanic Garden, Genebank, and both, using buffered points (10km radius) and point size 0.002
+#   - Output: PNG and PDF to specified path, color scales matching playground
+
+# --- Libraries ---
+library(dplyr)
+library(readxl)
+library(readr)
+library(ggplot2)
+library(sf)
+library(rnaturalearth)
+library(stringr)
+
+# --- Helper function for saving both PDF and PNG ---
+save_map_both <- function(plot, filename_base, output_dir, width = 14, height = 7, units = "in") {
+  pdf_path <- file.path(output_dir, paste0(filename_base, ".pdf"))
+  png_path <- file.path(output_dir, paste0(filename_base, ".png"))
+  ggsave(pdf_path, plot = plot, width = width, height = height, units = units, device = cairo_pdf, bg = "white")
+  ggsave(png_path, plot = plot, width = width, height = height, units = units, dpi = 300, bg = "white")
+}
+
+# --- Parameters & Paths ---
+data_root <- "G:/.shortcut-targets-by-id/1kQBvFIumhKQHnxSXNhr7w70dvuHgheEO/GCCFP/Data and analyses/"
+output_dir <- "G:/.shortcut-targets-by-id/1s1xfW_iLmsvnSftrb38wREf8b0QSuicc/GCCFP/Data and analyses/Food plant distributions/outputs/20km_pt0.002_bufferhalfgrid/"
+if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
+set.seed(42)
+
+# --- Data Import ---
+WCFP_plantlist_processed <- read_excel(
+  file.path(data_root, "Complementarity analysis/Data_processed/WCFP_plantlist_processed_2025-08-07.xlsx")
+)
+
+# GBIF observations
+gbif_observations <- read_csv(
+  file.path(data_root, "Food plant distributions/GBIF_geo_data/WCFP_GBIF_observations_2025-08-27.csv")
+) %>%
+  select(latitude, longitude, genus_species, inst_code) %>%
+  mutate(
+    data_source = "GBIF observations",
+    inst_type = "Botanic garden"
+  )
+
+# Genebank accession-level
+genebank_accessionlevel_dataset <- read_csv(
+  file.path(data_root, "Complementarity analysis/Data_processed/Datasets_processed/WCFP_genebank_accessionlevel_dataset_2025-08-26.csv")
+)
+
+# Read original Genesys file
+WCFP_Genesys_data_all <- read.csv("Data/colin_dataset_from_Christelle_2025-03-25.csv", sep = ";") %>%
+  mutate(data_source = "Genesys")
+
+# Merge lat/lon for genebank
+genebank_accessionlevel_with_coords <- genebank_accessionlevel_dataset %>%
+  left_join(
+    WCFP_Genesys_data_all %>%
+      select(UUID, DECLATITUDE, DECLONGITUDE),
+    by = c("uuid" = "UUID")
+  ) %>%
+  select(-latitude, -longitude) %>%
+  rename(
+    latitude = DECLATITUDE,
+    longitude = DECLONGITUDE
+  ) %>%
+  mutate(
+    latitude = as.numeric(str_replace(latitude, ",", ".")),
+    longitude = as.numeric(str_replace(longitude, ",", "."))
+  )
+genebank_accessionlevel_dataset_selected <- genebank_accessionlevel_with_coords %>%
+  select(genus_species, latitude, longitude, data_source, inst_type)
+
+# Botanic Garden accession-level
+botanicgarden_accessionlevel_dataset <- read_csv(
+  file.path(data_root, "Complementarity analysis/Data_processed/Datasets_processed/WCFP_botanicgarden_accessionlevel_dataset_2025-08-27.csv")
+)
+botanicgarden_accessionlevel_with_coords <- botanicgarden_accessionlevel_dataset %>%
+  left_join(
+    WCFP_Genesys_data_all %>%
+      select(UUID, DECLATITUDE, DECLONGITUDE),
+    by = c("uuid" = "UUID")
+  ) %>%
+  mutate(
+    latitude = if_else(
+      data_source == "Genesys",
+      as.numeric(str_replace(DECLATITUDE, ",", ".")),
+      latitude
+    ),
+    longitude = if_else(
+      data_source == "Genesys",
+      as.numeric(str_replace(DECLONGITUDE, ",", ".")),
+      longitude
+    )
+  ) %>%
+  select(-DECLATITUDE, -DECLONGITUDE)
+botanicgarden_accessionlevel_dataset_selected <- botanicgarden_accessionlevel_with_coords %>%
+  select(genus_species, latitude, longitude, data_source, inst_type)
+
+# Botanic Garden species-level
+botanicgarden_specieslevel_dataset_selected <- read_csv(
+  file.path(data_root, "Complementarity analysis/Data_processed/Datasets_processed/WCFP_botanicgarden_specieslevel_dataset_2025-08-26.csv")
+) %>%
+  select(genus_species, latitude, longitude, data_source, inst_type)
+
+# Combine all occurrences
+occurrences_data <- bind_rows(
+  gbif_observations,
+  genebank_accessionlevel_dataset_selected,
+  botanicgarden_accessionlevel_dataset_selected,
+  botanicgarden_specieslevel_dataset_selected
+) %>%
+  filter(!is.na(latitude), !is.na(longitude)) %>%
+  filter(between(latitude, -90, 90), between(longitude, -180, 180))
+
+# --- Spatial Data Preparation ---
+# 1. Load world land polygons (exclude Antarctica)
+world <- ne_countries(scale = "medium", returnclass = "sf") %>%
+  filter(admin != "Antarctica")
+world_4326 <- st_transform(world, 4326)
+
+# 2. Convert occurrences to sf
+occurrences_sf <- st_as_sf(
+  occurrences_data,
+  coords = c("longitude", "latitude"),
+  crs = 4326, remove = FALSE
+)
+
+# 3. Filter to land only
+occurrences_land <- st_join(occurrences_sf, world_4326, join = st_within, left = FALSE)
+
+# 4. Grid/heatmap creation function
+make_grid_and_tables <- function(occurrences_land, crs_equalarea, cell_size) {
+  occurrences_proj <- st_transform(occurrences_land, crs = crs_equalarea)
+  grid <- st_make_grid(occurrences_proj, cellsize = c(cell_size, cell_size), what = "polygons")
+  grid_sf <- st_sf(grid_id = 1:length(grid), geometry = grid)
+  point_grid_join <- st_join(occurrences_proj, grid_sf, left = FALSE)
+  # Occurrence density
+  density_table <- point_grid_join %>%
+    st_drop_geometry() %>%
+    group_by(grid_id) %>%
+    tally(name = "count")
+  # Species richness
+  richness_table <- point_grid_join %>%
+    st_drop_geometry() %>%
+    group_by(grid_id) %>%
+    summarise(richness = n_distinct(genus_species))
+  grid_with_counts <- left_join(grid_sf, density_table, by = "grid_id")
+  grid_with_counts$count[is.na(grid_with_counts$count)] <- 0
+  grid_with_richness <- left_join(grid_sf, richness_table, by = "grid_id")
+  grid_with_richness$richness[is.na(grid_with_richness$richness)] <- 0
+  list(grid_sf = grid_sf,
+       grid_with_counts = grid_with_counts,
+       grid_with_richness = grid_with_richness)
+}
+
+# 5. Filter occurrence points by institution type
+bg_points <- occurrences_land %>% filter(inst_type == "Botanic garden", data_source != "GBIF observations")
+gb_points <- occurrences_land %>% filter(inst_type == "Genebank")
+
+# --- 20km grid only, overlays with buffered points (10km) and pt size 0.002 ---
+crs_equalarea <- 8857 # Equal Earth
+cell_size <- 20000 # 20km
+
+# 1. Create grid and tables
+grid_tables <- make_grid_and_tables(occurrences_land, crs_equalarea, cell_size)
+grid_with_counts <- grid_tables$grid_with_counts
+grid_with_richness <- grid_tables$grid_with_richness
+
+# 2. Mask grid to land
+world_proj <- st_transform(world_4326, crs = crs_equalarea)
+grid_land <- st_filter(grid_with_counts, world_proj)
+grid_richness_land <- st_filter(grid_with_richness, world_proj)
+world_plot <- st_transform(world_4326, crs = crs_equalarea)
+
+# 3. Project and buffer overlay points
+pt_size <- 0.002
+buffer_size <- cell_size / 2 # 10,000m
+
+bg_points_proj <- st_transform(bg_points, crs = crs_equalarea)
+gb_points_proj <- st_transform(gb_points, crs = crs_equalarea)
+
+bg_points_buf <- st_buffer(bg_points_proj, dist = buffer_size)
+gb_points_buf <- st_buffer(gb_points_proj, dist = buffer_size)
+
+# 4. Project grid for overlays
+grid_land_proj <- st_transform(grid_land, crs = crs_equalarea)
+grid_richness_land_proj <- st_transform(grid_richness_land, crs = crs_equalarea)
+
+
+
+# --- Summary stats extraction ---
+
+# Total count of mapped occurrences (land only)
+total_occurrences <- nrow(occurrences_land)
+cat("Total mapped occurrences:", total_occurrences, "\n")
+
+# Total Genebank points
+total_gb_points <- nrow(gb_points)
+cat("Total Genebank points:", total_gb_points, "\n")
+
+# Total Botanic Garden points
+total_bg_points <- nrow(bg_points)
+cat("Total Botanic Garden points:", total_bg_points, "\n")
+
+# Max occurrence richness (density) in any 20km cell
+max_occ_richness <- max(grid_land_proj$count, na.rm = TRUE)
+cat("Max occurrence richness (density):", max_occ_richness, "\n")
+
+# Max species richness in any 20km cell
+max_species_richness <- max(grid_richness_land_proj$richness, na.rm = TRUE)
+cat("Max species richness:", max_species_richness, "\n")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# --- Map generation definitions ---
+map_definitions <- list(
+  list(
+    type = "occurrence",
+    overlays = list(
+      list(name = "Botanic garden", data = bg_points_buf, color = "purple", file = "map03_occ_density_bg_pts_20km"),
+      list(name = "Genebank Points", data = gb_points_buf, color = "goldenrod", file = "map04_occ_density_gb_pts_20km"),
+      list(
+        name = c("Botanic garden", "Genebank Points"),
+        data = list(bg_points_buf, gb_points_buf),
+        color = c("purple", "goldenrod"),
+        file = "map05_occ_density_bg_gb_pts_20km"
+      )
+    ),
+    fill_aes = aes(fill = count),
+    fill_title = "Occurrences",
+    fill_var = "count",
+    grid_data = grid_land_proj,
+    title = "Global occurrence density, 20km"
+  ),
+  list(
+    type = "richness",
+    overlays = list(
+      list(name = "Botanic garden", data = bg_points_buf, color = "purple", file = "map06_species_richness_bg_pts_20km"),
+      list(name = "Genebank Points", data = gb_points_buf, color = "goldenrod", file = "map07_species_richness_gb_pts_20km"),
+      list(
+        name = c("Botanic garden", "Genebank Points"),
+        data = list(bg_points_buf, gb_points_buf),
+        color = c("purple", "goldenrod"),
+        file = "map08_species_richness_bg_gb_pts_20km"
+      )
+    ),
+    fill_aes = aes(fill = richness),
+    fill_title = "Richness",
+    fill_var = "richness",
+    grid_data = grid_richness_land_proj,
+    title = "Global species richness, 20km"
+  )
+)
+
+for (map_def in map_definitions) {
+  for (overlay in map_def$overlays) {
+    p <- ggplot() +
+      geom_sf(data = world_plot, fill = "grey98", color = NA) +
+      geom_sf(data = map_def$grid_data, mapping = map_def$fill_aes, color = NA) +
+      geom_sf(data = world_plot, fill = NA, color = "grey80", size = 0.2)
+
+    # Overlay logic
+    if (is.list(overlay$data) && length(overlay$data) == 2) {
+      p <- p +
+        geom_sf(data = overlay$data[[1]], aes(color = overlay$name[1]), size = pt_size, alpha = 0.4, show.legend = "point") +
+        geom_sf(data = overlay$data[[2]], aes(color = overlay$name[2]), size = pt_size, alpha = 0.4, show.legend = "point") +
+        scale_color_manual(
+          name = "Overlay Points",
+          values = setNames(overlay$color, overlay$name),
+          guide = guide_legend(override.aes = list(size = 3, alpha = 1))
+        )
+    } else {
+      p <- p +
+        geom_sf(data = overlay$data, aes(color = overlay$name), size = pt_size, alpha = 0.4, show.legend = "point") +
+        scale_color_manual(
+          name = "Overlay Points",
+          values = setNames(overlay$color, overlay$name),
+          guide = guide_legend(override.aes = list(size = 3, alpha = 1))
+        )
+    }
+    p <- p +
+      scale_fill_gradient(
+        low = "lightgreen", high = "darkgreen", trans = "log10", na.value = "white",
+        name = map_def$fill_title
+      ) +
+      labs(
+        title = paste0(map_def$title, if (length(overlay$name) == 2) " (BG & Genebanks, buffer 10km)" else
+          sprintf(" (%s, buffer 10km)", overlay$name[1])),
+        fill = map_def$fill_title
+      ) +
+      theme_minimal() +
+      theme(panel.background = element_rect(fill = "white", color = NA))
+    save_map_both(p, overlay$file, output_dir)
+    cat(sprintf("Saved: %s.[pdf|png]\n", overlay$file))
+  }
+}
+
+
+
+
+
+
+
+
+# --- Save map01 and map02 with updated color and theme, 20km grid, in a loop ---
+
+main_maps <- list(
+  list(
+    name = "map01_occurrence_density_20km",
+    data = grid_land_proj,
+    fill_aes = aes(fill = count),
+    fill_title = "Occurrences",
+    plot_title = "Global occurrence density, 20km grid"
+  ),
+  list(
+    name = "map02_species_richness_20km",
+    data = grid_richness_land_proj,
+    fill_aes = aes(fill = richness),
+    fill_title = "Species Richness",
+    plot_title = "Global species richness, 20km grid"
+  )
+)
+
+for (m in main_maps) {
+  p <- ggplot() +
+    geom_sf(data = world_plot, fill = "grey98", color = NA) + # background
+    geom_sf(data = m$data, mapping = m$fill_aes, color = NA) +
+    geom_sf(data = world_plot, fill = NA, color = "grey80", size = 0.2) + # outlines
+    scale_fill_gradient(
+      low = "lightgreen", high = "darkgreen", trans = "log10", na.value = "white",
+      name = m$fill_title
+    ) +
+    labs(
+      title = m$plot_title,
+      fill = m$fill_title
+    ) +
+    theme_minimal() +
+    theme(panel.background = element_rect(fill = "white", color = NA))
+  save_map_both(p, m$name, output_dir)
+  cat(sprintf("Saved: %s.[pdf|png]\n", m$name))
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+################################################################################
+
+# --- Load repository master lists ---
+genebank_locations <- read_excel("G:/.shortcut-targets-by-id/1s1xfW_iLmsvnSftrb38wREf8b0QSuicc/GCCFP/Data and analyses/Food plant distributions/FAO_WIEWS_organizations_PG.xlsx")
+botanicgarden_location <- read_csv("G:/.shortcut-targets-by-id/1s1xfW_iLmsvnSftrb38wREf8b0QSuicc/GCCFP/Data and analyses/Food plant distributions/GardenSearch gardens/gardenSearch_export_August2025 - for Colin.csv")
+
+####### DATA PREP for institute names filled out #################################
+
+### 1. Fill in inst_names for botanicgarden_accessionlevel_dataset
+# Read in your reference file if not already in your environment
+inst_names_long_SG <- read_excel("Data/inst_names_long_SG.xlsx")
+
+# fill in inst_name
+botanicgarden_accessionlevel_dataset <- botanicgarden_accessionlevel_dataset %>%
+  left_join(
+    inst_names_long_SG %>% select(inst_code, inst_name_ref = inst_name),
+    by = "inst_code"
+  ) %>%
+  mutate(
+    inst_name = ifelse(is.na(inst_name), inst_name_ref, inst_name)
+  ) %>%
+  select(-inst_name_ref)
+
+
+### 2. Fill in inst_names for genebank_accessionlevel_dataset
+# Read in WIEWS_inst_names
+WIEWS_inst_names <- read_excel("G:/.shortcut-targets-by-id/1s1xfW_iLmsvnSftrb38wREf8b0QSuicc/GCCFP/Data and analyses/Food plant distributions/FAO_WIEWS_organizations_PG.xlsx") %>%
+  select(inst_code = `WIEWS instcode`, inst_name_fill = `Name of organization`)
+
+# Fill in missing inst_name in genebank_accessionlevel_dataset
+genebank_accessionlevel_dataset <- genebank_accessionlevel_dataset %>%
+  left_join(WIEWS_inst_names, by = c("inst_code")) %>%
+  mutate(
+    inst_name = ifelse(is.na(inst_name) | inst_name == "", inst_name_fill, inst_name)
+  ) %>%
+  select(-inst_name_fill)
+
+# Now genebank_accessionlevel_dataset$inst_name is filled where possible!
+
+
+### 3. botanicgarden_specieslevel_dataset
+botanicgarden_specieslevel_dataset <- botanicgarden_specieslevel_dataset %>%
+  rename(inst_name = ex_situ_site_name)
+## all inst_name filled out
+
+#### 4. gbif_observations
+library(dplyr)
+library(readxl)
+
+# Read in the WIEWS_inst_names file, selecting relevant columns and renaming them
+WIEWS_inst_names <- read_excel("G:/.shortcut-targets-by-id/1s1xfW_iLmsvnSftrb38wREf8b0QSuicc/GCCFP/Data and analyses/Food plant distributions/FAO_WIEWS_organizations_PG.xlsx") %>%
+  select(inst_code = `WIEWS instcode`, inst_name = `Name of organization`) %>%
+  distinct(inst_code, .keep_all = TRUE) # Ensure unique inst_code
+
+# Join to add inst_name to gbif_observations
+gbif_observations <- gbif_observations %>%
+  left_join(WIEWS_inst_names, by = "inst_code")
+
+
+inst_names_long_SG <- read_excel("Data/inst_names_long_SG.xlsx")
+
+# fill in inst_name
+gbif_observations <- gbif_observations %>%
+  left_join(
+    inst_names_long_SG %>% select(inst_code, inst_name_ref = inst_name),
+    by = "inst_code"
+  ) %>%
+  mutate(
+    inst_name = ifelse(is.na(inst_name), inst_name_ref, inst_name)
+  ) %>%
+  select(-inst_name_ref)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# --- 1. Extract unique repository identifiers from your occurrence datasets ---
+library(dplyr)
+library(readxl)
+library(readr)
+library(sf)
+
+used_genebank_names <- unique(genebank_accessionlevel_dataset$inst_name)
+used_garden_names <- unique(botanicgarden_accessionlevel_dataset$inst_name)
+
+# --- 2. Filter master lists to only those used in your datasets ---
+genebank_locations <- read_excel("G:/.shortcut-targets-by-id/1s1xfW_iLmsvnSftrb38wREf8b0QSuicc/GCCFP/Data and analyses/Food plant distributions/FAO_WIEWS_organizations_PG.xlsx")
+filtered_genebank_locations <- genebank_locations %>%
+  filter(`Name of organization` %in% used_genebank_names)
+
+botanicgarden_locations <- read_csv("G:/.shortcut-targets-by-id/1s1xfW_iLmsvnSftrb38wREf8b0QSuicc/GCCFP/Data and analyses/Food plant distributions/GardenSearch gardens/gardenSearch_export_August2025 - for Colin.csv")
+filtered_botanicgarden_locations <- botanicgarden_locations %>%
+  filter(organisation_name %in% used_garden_names) %>%
+  mutate(
+    longitude = suppressWarnings(as.numeric(longitude)),
+    latitude = suppressWarnings(as.numeric(latitude))
+  ) %>%
+  filter(!is.na(longitude), !is.na(latitude))
+
+# --- 3. Prepare and project for plotting ---
+crs_equalarea <- 8857 # Equal Earth
+
+genebank_locations_sf <- filtered_genebank_locations %>%
+  select(name = `Name of organization`,
+         longitude = `Longitude (decimal degrees format)`,
+         latitude = `Latitude (decimal degrees format)`) %>%
+  mutate(
+    longitude = as.numeric(longitude),
+    latitude = as.numeric(latitude)
+  ) %>%
+  filter(!is.na(longitude), !is.na(latitude)) %>%
+  st_as_sf(coords = c("longitude", "latitude"), crs = 4326) %>%
+  st_transform(crs_equalarea) %>%
+  mutate(type = "Genebank")
+
+botanicgarden_locations_sf <- filtered_botanicgarden_locations %>%
+  select(name = organisation_name, longitude, latitude) %>%
+  st_as_sf(coords = c("longitude", "latitude"), crs = 4326) %>%
+  st_transform(crs_equalarea) %>%
+  mutate(type = "Botanic garden")
+
+repo_locations_sf <- bind_rows(genebank_locations_sf, botanicgarden_locations_sf)
+
+
+
+
+
+
