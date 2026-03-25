@@ -405,7 +405,7 @@ WCFP_WIEWS_data_all2 <- WCFP_WIEWS_data_all %>%
 WCFP_WIEWS_data_all2 <- WCFP_WIEWS_data_all2 %>%
   mutate(genus_species_WFO = extract_genus_species(Standardized_taxa))
 
-# save the raw WIEWS file with standardized names
+# save the raw WIEWS data with standardized names
 write.csv(WCFP_WIEWS_data_all2, "C:/Users/sarah/OneDrive/Desktop/GCCFP_final/GCCFP_final/Data/Processed_data/Standardized/WCFP_WIEWS_data_all_standardized_2026-02-26.csv", row.names = FALSE)
 
 
