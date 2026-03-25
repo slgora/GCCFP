@@ -163,7 +163,6 @@ write.csv(WCFP_Genesys_data_all, "C:/Users/sarah/OneDrive/Desktop/GCCFP_final/GC
 
 
 
-
 #-------------------------------#
 #--- BGCI Taxa Standardization -#
 #-------------------------------#
